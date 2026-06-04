@@ -2,10 +2,15 @@
 //! run inside the `Cowork` distro, emitting the guest→host JSON-lines protocol.
 //!
 //! The sequence is: apt prerequisites → Linuxbrew → mise → shellrc activation →
-//! (optional) pinned Node → locales → default workspace. Each step emits a
-//! `Progress` first; on failure the step emits a structured `Error` envelope and
-//! the run stops. brew/mise installs are skipped when already present, and the
-//! shellrc lines are appended only when absent, so a re-run is idempotent.
+//! locales → default workspace. Each step emits a `Progress` first; on failure
+//! the step emits a structured `Error` envelope and the run stops. brew/mise
+//! installs are skipped when already present, and the shellrc lines are appended
+//! only when absent, so a re-run is idempotent.
+//!
+//! mise is installed but no runtime is pinned: it is the user's own
+//! workspace-scoped runtime manager (`mise use node/python`), not an agent
+//! dependency — all three agents (claude/agy/codex) ship self-contained native
+//! binaries, so the bootstrap installs no language runtime.
 //!
 //! All decision logic is pure and unit-tested here against a mock
 //! [`BootstrapOps`]; the real process/filesystem glue is [`LinuxOps`].
@@ -27,8 +32,6 @@ use command::Cmd;
 pub struct Config {
     /// The invoking user's home directory (resolved from `$HOME` by the caller).
     pub home: String,
-    /// Install the pinned Node toolchain (set iff codex is selected).
-    pub with_node: bool,
 }
 
 /// Outcome of [`run_bootstrap`].
@@ -135,18 +138,7 @@ fn run_steps(
     progress(sink, command::step::SHELLRC);
     ensure_shellrc(ops, &config.home)?;
 
-    // 5. pinned Node toolchain (only if codex is selected).
-    if config.with_node {
-        progress(sink, command::step::NODE);
-        if let Err(f) = run_cmd(ops, &command::node_pin_cmd(&config.home)) {
-            return Err(with_cause(
-                command::node_install_failed_envelope(f.exit_code()),
-                &f,
-            ));
-        }
-    }
-
-    // 6. locales (no dedicated code → internal.unknown).
+    // 5. locales (no dedicated code → internal.unknown).
     progress(sink, command::step::LOCALES);
     if let Err(f) = run_cmd(ops, &command::locale_gen_cmd()) {
         let env =
@@ -154,7 +146,7 @@ fn run_steps(
         return Err(with_cause(env, &f));
     }
 
-    // 7. default workspace (no dedicated code → internal.unknown).
+    // 6. default workspace (no dedicated code → internal.unknown).
     progress(sink, command::step::WORKSPACE);
     let workspace = command::workspace_path(&config.home);
     if let Err(e) = ops.create_dir_all(&workspace) {
@@ -297,9 +289,6 @@ mod tests {
             }
             return "bash-other".to_string();
         }
-        if cmd.program.ends_with("/mise") {
-            return "node".to_string();
-        }
         "other".to_string()
     }
 
@@ -346,10 +335,9 @@ mod tests {
         }
     }
 
-    fn config(with_node: bool) -> Config {
+    fn config() -> Config {
         Config {
             home: "/home/u".to_string(),
-            with_node,
         }
     }
 
@@ -365,7 +353,7 @@ mod tests {
     fn happy_path_emits_hello_all_progress_then_done() {
         let mut ops = MockOps::new();
         let mut sink = CollectingSink::default();
-        let out = run_bootstrap(&mut ops, &mut sink, &config(true));
+        let out = run_bootstrap(&mut ops, &mut sink, &config());
         assert!(matches!(out, BootstrapOutcome::Done));
 
         assert_eq!(sink.events.first().map(|(t, _)| t.as_str()), Some("hello"));
@@ -377,25 +365,13 @@ mod tests {
                 "brew-install",
                 "mise-install",
                 "shellrc",
-                "node-pin",
                 "locale-gen",
                 "workspace",
             ]
         );
-        // brew + mise installs ran (not present), node ran (with_node).
+        // brew + mise installs ran (not present).
         assert!(ops.ran("brew"));
         assert!(ops.ran("mise"));
-        assert!(ops.ran("node"));
-    }
-
-    #[test]
-    fn without_node_skips_node_step() {
-        let mut ops = MockOps::new();
-        let mut sink = CollectingSink::default();
-        let out = run_bootstrap(&mut ops, &mut sink, &config(false));
-        assert!(matches!(out, BootstrapOutcome::Done));
-        assert!(!steps(&sink).iter().any(|s| s == "node-pin"));
-        assert!(!ops.ran("node"));
     }
 
     #[test]
@@ -404,7 +380,7 @@ mod tests {
         ops.present.insert(command::BREW_BIN.to_string());
         ops.present.insert(command::mise_bin("/home/u"));
         let mut sink = CollectingSink::default();
-        let out = run_bootstrap(&mut ops, &mut sink, &config(true));
+        let out = run_bootstrap(&mut ops, &mut sink, &config());
         assert!(matches!(out, BootstrapOutcome::Done));
         // The expensive network installers must NOT have run.
         assert!(!ops.ran("brew"));
@@ -421,7 +397,7 @@ mod tests {
         ops.files
             .insert(command::shellrc_path("/home/u"), existing.clone());
         let mut sink = CollectingSink::default();
-        let out = run_bootstrap(&mut ops, &mut sink, &config(false));
+        let out = run_bootstrap(&mut ops, &mut sink, &config());
         assert!(matches!(out, BootstrapOutcome::Done));
         // No new lines appended: the file is byte-for-byte the seeded content.
         assert_eq!(
@@ -434,7 +410,7 @@ mod tests {
     fn shellrc_appends_both_lines_when_absent() {
         let mut ops = MockOps::new();
         let mut sink = CollectingSink::default();
-        run_bootstrap(&mut ops, &mut sink, &config(false));
+        run_bootstrap(&mut ops, &mut sink, &config());
         let content = ops
             .files
             .get(&command::shellrc_path("/home/u"))
@@ -457,7 +433,7 @@ mod tests {
         let mut ops = MockOps::new();
         ops.fail.insert("apt-update".to_string(), 1);
         let mut sink = CollectingSink::default();
-        let out = run_bootstrap(&mut ops, &mut sink, &config(true));
+        let out = run_bootstrap(&mut ops, &mut sink, &config());
         assert_failed_with(out, cowork_errors::Code::ToolchainPrereqAptFailed);
         // Stopped at the first step: no later progress.
         assert_eq!(steps(&sink), vec!["apt-prereqs"]);
@@ -468,7 +444,7 @@ mod tests {
         let mut ops = MockOps::new();
         ops.fail.insert("apt-install".to_string(), 100);
         let mut sink = CollectingSink::default();
-        let out = run_bootstrap(&mut ops, &mut sink, &config(true));
+        let out = run_bootstrap(&mut ops, &mut sink, &config());
         assert_failed_with(out, cowork_errors::Code::ToolchainPrereqAptFailed);
     }
 
@@ -477,7 +453,7 @@ mod tests {
         let mut ops = MockOps::new();
         ops.fail.insert("brew".to_string(), 1);
         let mut sink = CollectingSink::default();
-        let out = run_bootstrap(&mut ops, &mut sink, &config(true));
+        let out = run_bootstrap(&mut ops, &mut sink, &config());
         assert_failed_with(out, cowork_errors::Code::ToolchainBrewInstallFailed);
     }
 
@@ -486,17 +462,8 @@ mod tests {
         let mut ops = MockOps::new();
         ops.fail.insert("mise".to_string(), 2);
         let mut sink = CollectingSink::default();
-        let out = run_bootstrap(&mut ops, &mut sink, &config(true));
+        let out = run_bootstrap(&mut ops, &mut sink, &config());
         assert_failed_with(out, cowork_errors::Code::ToolchainMiseInstallFailed);
-    }
-
-    #[test]
-    fn node_failure_maps_to_node_code() {
-        let mut ops = MockOps::new();
-        ops.fail.insert("node".to_string(), 3);
-        let mut sink = CollectingSink::default();
-        let out = run_bootstrap(&mut ops, &mut sink, &config(true));
-        assert_failed_with(out, cowork_errors::Code::ToolchainNodeInstallFailed);
     }
 
     #[test]
@@ -504,7 +471,7 @@ mod tests {
         let mut ops = MockOps::new();
         ops.append_fail = true;
         let mut sink = CollectingSink::default();
-        let out = run_bootstrap(&mut ops, &mut sink, &config(false));
+        let out = run_bootstrap(&mut ops, &mut sink, &config());
         assert_failed_with(out, cowork_errors::Code::ToolchainShellrcWriteFailed);
     }
 
@@ -513,7 +480,7 @@ mod tests {
         let mut ops = MockOps::new();
         ops.fail.insert("locale".to_string(), 1);
         let mut sink = CollectingSink::default();
-        let out = run_bootstrap(&mut ops, &mut sink, &config(false));
+        let out = run_bootstrap(&mut ops, &mut sink, &config());
         assert_failed_with(out, cowork_errors::Code::InternalUnknown);
     }
 
@@ -522,7 +489,7 @@ mod tests {
         let mut ops = MockOps::new();
         ops.dir_fail = true;
         let mut sink = CollectingSink::default();
-        let out = run_bootstrap(&mut ops, &mut sink, &config(false));
+        let out = run_bootstrap(&mut ops, &mut sink, &config());
         assert_failed_with(out, cowork_errors::Code::InternalUnknown);
     }
 

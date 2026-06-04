@@ -15,8 +15,6 @@ pub const BREW_INSTALL_URL: &str =
     "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh";
 /// mise's official short installer URL (redirects to the hosted install script).
 pub const MISE_INSTALL_URL: &str = "https://mise.run";
-/// The Node.js version pinned by exact patch (Node 24 Active LTS "Krypton").
-pub const NODE_VERSION: &str = "24.16.0";
 /// apt prerequisites Homebrew's Linux docs require.
 pub const APT_PACKAGES: &[&str] = &["build-essential", "procps", "curl", "file", "git"];
 /// Locales generated for the ja/ko/en trilingual product.
@@ -29,7 +27,6 @@ pub mod step {
     pub const BREW: &str = "brew-install";
     pub const MISE: &str = "mise-install";
     pub const SHELLRC: &str = "shellrc";
-    pub const NODE: &str = "node-pin";
     pub const LOCALES: &str = "locale-gen";
     pub const WORKSPACE: &str = "workspace";
 }
@@ -107,21 +104,6 @@ pub fn mise_bin(home: &str) -> String {
     format!("{home}/.local/bin/mise")
 }
 
-/// `<home>/.local/bin/mise use -g node@<NODE_VERSION>` — install (if absent) and
-/// set the global Node version to the exact pinned patch. Invoked by absolute
-/// path because the bootstrap shell is non-login (mise is not yet on PATH).
-pub fn node_pin_cmd(home: &str) -> Cmd {
-    Cmd {
-        program: mise_bin(home),
-        args: vec![
-            "use".to_string(),
-            "-g".to_string(),
-            format!("node@{NODE_VERSION}"),
-        ],
-        env: Vec::new(),
-    }
-}
-
 /// `sudo locale-gen <LOCALES>`.
 pub fn locale_gen_cmd() -> Cmd {
     let mut args = vec!["locale-gen".to_string()];
@@ -176,13 +158,6 @@ pub fn brew_install_failed_envelope(exit_code: i32) -> Envelope {
 /// `toolchain.mise_install_failed` (Transient).
 pub fn mise_install_failed_envelope(exit_code: i32) -> Envelope {
     Envelope::new(Code::ToolchainMiseInstallFailed, Stage::Toolchain)
-        .with_context("exitCode", exit_code.to_string())
-}
-
-/// `toolchain.node_install_failed` (Transient).
-pub fn node_install_failed_envelope(exit_code: i32) -> Envelope {
-    Envelope::new(Code::ToolchainNodeInstallFailed, Stage::Toolchain)
-        .with_context("version", NODE_VERSION)
         .with_context("exitCode", exit_code.to_string())
 }
 
@@ -245,20 +220,6 @@ mod tests {
     }
 
     #[test]
-    fn node_pin_uses_absolute_mise_and_exact_patch() {
-        let c = node_pin_cmd("/home/u");
-        assert_eq!(c.program, "/home/u/.local/bin/mise");
-        assert_eq!(
-            c.args,
-            vec![
-                "use".to_string(),
-                "-g".to_string(),
-                "node@24.16.0".to_string()
-            ]
-        );
-    }
-
-    #[test]
     fn locale_gen_lists_three_locales() {
         let c = locale_gen_cmd();
         assert_eq!(c.program, "sudo");
@@ -303,17 +264,6 @@ mod tests {
         let e = mise_install_failed_envelope(7);
         assert_eq!(e.code, Code::ToolchainMiseInstallFailed);
         assert_eq!(e.context.get("exitCode").map(String::as_str), Some("7"));
-    }
-
-    #[test]
-    fn node_envelope_carries_version_and_exit_code() {
-        let e = node_install_failed_envelope(3);
-        assert_eq!(e.code, Code::ToolchainNodeInstallFailed);
-        assert_eq!(
-            e.context.get("version").map(String::as_str),
-            Some("24.16.0")
-        );
-        assert_eq!(e.context.get("exitCode").map(String::as_str), Some("3"));
     }
 
     #[test]

@@ -33,12 +33,7 @@ enum Command {
     Protocol,
     /// Run the toolchain bootstrap inside the distro (WP6), emitting JSON-lines
     /// progress on stdout.
-    Bootstrap {
-        /// Install the pinned Node toolchain. Set by the host iff `codex` is
-        /// among the selected agents (codex is the only Node-dependent agent).
-        #[arg(long = "with-node")]
-        with_node: bool,
-    },
+    Bootstrap,
 }
 
 fn main() -> ExitCode {
@@ -50,11 +45,11 @@ fn main() -> ExitCode {
             println!("{}", cowork_errors::protocol::PROTOCOL_VERSION);
             ExitCode::SUCCESS
         }
-        Some(Command::Bootstrap { with_node }) => {
+        Some(Command::Bootstrap) => {
             let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
             let mut ops = LinuxOps;
             let mut sink = StdoutSink;
-            let config = Config { home, with_node };
+            let config = Config { home };
             match run_bootstrap(&mut ops, &mut sink, &config) {
                 BootstrapOutcome::Done => ExitCode::SUCCESS,
                 BootstrapOutcome::Failed(env) => {

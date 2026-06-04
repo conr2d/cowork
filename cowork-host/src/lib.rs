@@ -3,7 +3,9 @@
 //! `wsl.exe` / registry / Win32 probes) are the only OS-specific code. The thin
 //! Tauri command layer (`src-tauri`) depends on this crate.
 //!
-//! One module per setup phase. WP3: [`preflight`]. WP4: [`wsl`].
+//! One module per setup phase. WP3: [`preflight`]. WP4: [`wsl`]. WP5:
+//! [`protocol`] (guest JSON-lines stream parser).
 
 pub mod preflight;
+pub mod protocol;
 pub mod wsl;

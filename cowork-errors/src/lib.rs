@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 
 include!(concat!(env!("OUT_DIR"), "/codes.rs"));
 
+pub mod protocol;
+
 /// How the UI must treat an error. `Cancelled` is user cancellation (no error
 /// UI) — it maps to errors.json's `common.cancelled`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

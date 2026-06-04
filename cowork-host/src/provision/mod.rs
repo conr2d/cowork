@@ -5,9 +5,13 @@
 //! impl (`windows_provision`) is the only OS-specific part.
 
 mod command;
+#[cfg(any(windows, test))]
+mod inject;
 pub mod list;
 #[cfg(any(windows, test))]
 mod url;
+#[cfg(windows)]
+mod windows_inject;
 #[cfg(windows)]
 mod windows_provision;
 
@@ -16,6 +20,10 @@ pub use command::{
     install_named_args, rootfs_fetch_failed_envelope, unregister_args, unregister_failed_envelope,
     user_create_failed_envelope, verify_checksum,
 };
+#[cfg(any(windows, test))]
+pub use inject::{GUEST_BIN_PATH, RunOutcome, classify_run, launch_args, unc_inject_path};
+#[cfg(windows)]
+pub use windows_inject::{inject_guest, run_guest};
 #[cfg(windows)]
 pub use windows_provision::WindowsProvisionOps;
 

@@ -1,0 +1,71 @@
+//! `#[cfg(windows)]` guest-CLI injection + run: copy the binary into the distro
+//! over the `\\wsl.localhost` share, set its executable bit, then spawn it via
+//! `wsl.exe` and stream its JSON-lines stdout through the host parser. Not
+//! compiled on Linux/CI-ubuntu; verified by the windows-gnu cross-check, the
+//! windows-latest runner, and the WP10 e2e gate. All decision logic it relies on
+//! is the pure, unit-tested `provision/inject.rs`.
+
+use std::io::{BufRead, BufReader};
+use std::process::{Command, Stdio};
+
+use cowork_errors::{Envelope, Stage};
+
+use crate::protocol::StreamParser;
+
+use super::inject::{
+    RunOutcome, chmod_args, classify_run, cli_inject_failed_envelope, cli_launch_failed_envelope,
+    launch_args, unc_inject_path,
+};
+
+/// Inject the host-side guest binary at `src_binary` into the `Cowork` distro:
+/// copy it to `\\wsl.localhost\Cowork\usr\local\bin\cowork`, then `chmod +x` it
+/// inside the distro (the copy does not carry the executable bit).
+pub fn inject_guest(src_binary: &str) -> Result<(), Envelope> {
+    let target = unc_inject_path();
+    if let Err(e) = std::fs::copy(src_binary, &target) {
+        return Err(cli_inject_failed_envelope(&format!(
+            "copy {src_binary} -> {target}: {e}"
+        )));
+    }
+    match Command::new("wsl.exe").args(chmod_args()).output() {
+        Ok(out) if out.status.success() => Ok(()),
+        Ok(out) => Err(cli_inject_failed_envelope(&format!(
+            "chmod exited {}",
+            out.status.code().unwrap_or(-1)
+        ))),
+        Err(e) => Err(cli_inject_failed_envelope(&format!("launch chmod: {e}"))),
+    }
+}
+
+/// Run the injected guest with `extra` args, streaming its stdout JSON-lines
+/// through [`StreamParser`] (stamped with [`Stage::Provision`]), and classify
+/// the finished run. stderr is human-readable noise and is discarded; the
+/// protocol is stdout-only.
+pub fn run_guest(extra: &[String]) -> RunOutcome {
+    let mut child = match Command::new("wsl.exe")
+        .args(launch_args(extra))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => return RunOutcome::LaunchFailed(cli_launch_failed_envelope(&e.to_string())),
+    };
+
+    let mut events = Vec::new();
+    if let Some(stdout) = child.stdout.take() {
+        let mut parser = StreamParser::new(Stage::Provision);
+        for line in BufReader::new(stdout).lines() {
+            let Ok(line) = line else { break };
+            if let Some(ev) = parser.push_line(&line) {
+                events.push(ev);
+            }
+        }
+    }
+
+    let exit_code = match child.wait() {
+        Ok(status) => status.code().unwrap_or(-1),
+        Err(_) => -1,
+    };
+    classify_run(&events, exit_code, Stage::Provision)
+}

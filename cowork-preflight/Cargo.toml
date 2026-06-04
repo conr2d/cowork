@@ -1,0 +1,30 @@
+[package]
+name = "cowork-preflight"
+description = "Cowork host-side preflight checks. Tauri-independent so the decision logic is unit-testable off-Windows; the cfg(windows) probe is the only OS-specific part."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "cowork_preflight"
+path = "src/lib.rs"
+
+[dependencies]
+cowork-errors = { path = "../cowork-errors" }
+serde = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_Foundation",
+    "Win32_System_Services",
+    "Win32_System_SystemServices",
+] }
+wmi = "0.18"
+winreg = "0.56"

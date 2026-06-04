@@ -43,6 +43,10 @@ jobs:
       - run: cargo clippy -p cowork-errors --all-targets -- -D warnings
       - run: cargo test -p cowork-errors
       - run: cargo build -p cowork-errors
+      # cowork-preflight: host crate, but its decision logic is platform-independent
+      # and unit-tested here. The cfg(windows) probe is compiled on the host job.
+      - run: cargo clippy -p cowork-preflight --all-targets -- -D warnings
+      - run: cargo test -p cowork-preflight
 
   # Conformance gates (the unit-seal gate). WP0: host/guest separation.
   # WP2 adds the errors.json single-source + 3-locale parity check here.
@@ -75,3 +79,7 @@ jobs:
       - run: pnpm build
       - run: cargo build -p cowork-app
       - run: cargo clippy -p cowork-app --all-targets -- -D warnings
+      # cowork-preflight: compile the cfg(windows) probe (windows-sys/wmi/winreg)
+      # and clippy it on the real Windows target.
+      - run: cargo build -p cowork-preflight
+      - run: cargo clippy -p cowork-preflight --all-targets -- -D warnings

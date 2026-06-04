@@ -1,0 +1,18 @@
+[package]
+name = "cowork"
+description = "Cowork guest CLI — host-agnostic bootstrap agent that runs inside WSL"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "cowork"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

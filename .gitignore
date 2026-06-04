@@ -1,0 +1,49 @@
+# Rust
+target/
+**/*.rs.bk
+*.pdb
+
+# Node
+node_modules/
+.pnpm-store/
+dist/
+build/
+.svelte-kit/
+
+# Tauri
+src-tauri/target/
+src-tauri/gen/
+src-tauri/Cargo.lock
+
+# Paraglide-JS generated
+src/lib/i18n/generated/
+src/paraglide/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# OS
+Thumbs.db
+
+# Local secrets / env
+.env
+.env.local
+*.secret
+*.pem
+*.p12
+*.pfx
+
+# Cowork local state (when dev-running)
+.cowork/
+.omc/
+
+# Logs
+*.log
+logs/
+
+# Test artifacts
+coverage/
+.nyc_output/

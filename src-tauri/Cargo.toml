@@ -1,0 +1,32 @@
+[package]
+name = "cowork-app"
+description = "Cowork — Windows host driver (Tauri v2); builds Cowork.exe"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+# Tauri v2 layout: a thin bin that calls into the lib (keeps a future mobile
+# target possible and the host-driver logic unit-testable).
+[lib]
+name = "cowork_app_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+# Cargo bin name differs from the bundled artifact on purpose: the workspace
+# already has a `cowork` binary (the guest CLI), so this one is `cowork-app`.
+# `productName = "Cowork"` in tauri.conf.json renames the bundle to Cowork.exe.
+[[bin]]
+name = "cowork-app"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-fs = "2"
+serde = { workspace = true }
+serde_json = { workspace = true }

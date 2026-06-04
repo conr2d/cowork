@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Frontend (SvelteKit-static): formatting, lint, type-check, and the static build.
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm lint
+      - run: pnpm build
+
+  # Guest CLI (`cowork`): host-agnostic, verified on Linux (its real runtime is WSL).
+  guest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy -p cowork --all-targets -- -D warnings
+      - run: cargo test -p cowork
+      - run: cargo build -p cowork
+
+  # Conformance gates (the unit-seal gate). WP0: host/guest separation.
+  # WP2 adds the errors.json single-source + 3-locale parity check here.
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Host/guest separation
+        run: python3 scripts/conformance/host_guest_separation.py
+
+  # Host driver (`cowork-app` → Cowork.exe): Windows is the real target (WebView2,
+  # wsl.exe, ConPTY, registry). Verified on windows-latest.
+  host:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: pnpm install --frozen-lockfile
+      # tauri-build reads tauri.conf.json and requires the frontend bundle to exist.
+      - run: pnpm build
+      - run: cargo build -p cowork-app
+      - run: cargo clippy -p cowork-app --all-targets -- -D warnings

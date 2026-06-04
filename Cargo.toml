@@ -1,0 +1,38 @@
+[workspace]
+resolver = "2"
+members = [
+    "src-tauri",
+    "cowork",
+]
+
+[workspace.package]
+version = "0.1.0-dev"
+edition = "2024"
+license = "Apache-2.0"
+authors = ["Cowork contributors"]
+repository = "https://github.com/cowork-community/cowork"
+rust-version = "1.85"
+
+[workspace.dependencies]
+# Shared across crates
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+thiserror = "2"
+anyhow = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "process", "fs", "time", "sync"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v7", "serde"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+opt-level = "z"
+strip = true
+panic = "abort"
+
+[profile.dev]
+opt-level = 0
+debug = true

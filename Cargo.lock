@@ -635,6 +635,7 @@ name = "cowork"
 version = "0.1.0-dev"
 dependencies = [
  "clap",
+ "cowork-errors",
  "serde",
  "serde_json",
 ]

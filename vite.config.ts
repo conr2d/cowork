@@ -1,12 +1,18 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
+import { paraglideVitePlugin } from '@inlang/paraglide-js';
 import { defineConfig } from 'vite';
 
-// Tauri expects a fixed dev port and quietens Vite's screen clearing so the
-// Rust logs stay visible. `1420` is Tauri's convention but we keep SvelteKit's
-// 5173 to match `devUrl` in tauri.conf.json.
 export default defineConfig({
-	plugins: [tailwindcss(), sveltekit()],
+	plugins: [
+		sveltekit(),
+		tailwindcss(),
+		paraglideVitePlugin({
+			project: './project.inlang',
+			outdir: './src/lib/paraglide',
+			strategy: ['localStorage', 'preferredLanguage', 'baseLocale']
+		})
+	],
 	clearScreen: false,
 	server: {
 		port: 5173,

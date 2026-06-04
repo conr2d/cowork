@@ -10,6 +10,7 @@ node_modules/
 src-tauri/target/
 src-tauri/gen/
 src/paraglide/
+src/lib/paraglide/
 src/lib/i18n/generated/
 pnpm-lock.yaml
 

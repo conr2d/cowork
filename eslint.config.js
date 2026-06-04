@@ -25,6 +25,7 @@ export default ts.config(
 			'dist/',
 			'src-tauri/',
 			'src/paraglide/',
+			'src/lib/paraglide/',
 			'src/lib/i18n/generated/'
 		]
 	}

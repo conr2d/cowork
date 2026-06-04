@@ -17,6 +17,7 @@ src-tauri/Cargo.lock
 
 # Paraglide-JS generated
 src/lib/i18n/generated/
+src/lib/paraglide/
 src/paraglide/
 
 # IDE

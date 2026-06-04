@@ -1,0 +1,10 @@
+{
+	"$schema": "https://inlang.com/schema/inlang-message-format",
+	"app_name": "Cowork",
+	"app_tagline": "AIコーディングエージェントを、安全にセットアップ。",
+	"wizard_welcome_title": "Coworkへようこそ",
+	"wizard_welcome_body": "このウィザードは、PCでAIコーディングエージェントを使うために必要なものをすべてセットアップします。",
+	"action_continue": "続ける",
+	"action_back": "戻る",
+	"disk_required": "Coworkには少なくとも{gib} GiBの空き容量が必要です。"
+}

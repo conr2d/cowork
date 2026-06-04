@@ -9,15 +9,18 @@
 		"dev": "vite dev",
 		"build": "vite build",
 		"preview": "vite preview",
-		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"paraglide:compile": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide",
+		"check": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"format": "prettier --write .",
 		"lint": "prettier --check . && eslint .",
+		"pretest": "paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide",
+		"test": "vitest run",
 		"tauri": "tauri",
 		"machine-translate": "inlang machine translate --project ./project.inlang"
 	},
 	"devDependencies": {
 		"@eslint/js": "^9.14.0",
-		"@inlang/paraglide-js": "^1.11.0",
+		"@inlang/paraglide-js": "^2.18.2",
 		"@sveltejs/adapter-static": "^3.0.5",
 		"@sveltejs/kit": "^2.8.0",
 		"@sveltejs/vite-plugin-svelte": "^4.0.0",
@@ -27,6 +30,7 @@
 		"eslint": "^9.14.0",
 		"eslint-plugin-svelte": "^3.0.0",
 		"globals": "^15.12.0",
+		"jsdom": "^29.1.1",
 		"prettier": "^3.3.0",
 		"prettier-plugin-svelte": "^4.0.0",
 		"prettier-plugin-tailwindcss": "^0.8.0",
@@ -35,7 +39,8 @@
 		"tailwindcss": "^4.0.0",
 		"typescript": "^5.6.0",
 		"typescript-eslint": "^8.15.0",
-		"vite": "^5.4.0"
+		"vite": "^5.4.0",
+		"vitest": "^2.1.9"
 	},
 	"dependencies": {
 		"@tauri-apps/api": "^2.1.0",

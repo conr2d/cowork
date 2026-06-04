@@ -1,0 +1,11 @@
+{
+	"$schema": "https://inlang.com/schema/inlang-message-format",
+	"app_name": "Cowork",
+	"app_tagline": "Set up an AI coding agent, safely.",
+	"wizard_welcome_title": "Welcome to Cowork",
+	"wizard_welcome_body": "This wizard sets up everything you need to use an AI coding agent on your PC.",
+	"action_continue": "Continue",
+	"action_back": "Back",
+	"disk_required": "Cowork needs at least {gib} GiB of free disk space.",
+	"fallback_probe": "This string exists only in English to verify base-locale fallback."
+}

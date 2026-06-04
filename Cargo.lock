@@ -667,6 +667,7 @@ dependencies = [
  "cowork-errors",
  "serde",
  "serde_json",
+ "sha2",
  "windows-sys 0.61.2",
  "winreg 0.56.0",
  "wmi",

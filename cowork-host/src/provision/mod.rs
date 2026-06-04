@@ -1,17 +1,23 @@
 //! Distro provisioning (WP5): create the dedicated `Cowork` distro without
 //! touching an existing `Ubuntu`, inject the guest CLI, and tear down on
 //! uninstall. Pure decision logic lives here and in the submodules behind the
-//! [`ProvisionOps`] seam; the `#[cfg(windows)]` `wsl.exe` / download / file-copy
-//! impl (added later) is the only OS-specific part.
+//! [`ProvisionOps`] seam; the `#[cfg(windows)]` `wsl.exe` / WinHTTP-download
+//! impl (`windows_provision`) is the only OS-specific part.
 
 mod command;
 pub mod list;
+#[cfg(any(windows, test))]
+mod url;
+#[cfg(windows)]
+mod windows_provision;
 
 pub use command::{
     already_exists_envelope, import_args, import_failed_envelope, install_failed_envelope,
     install_named_args, rootfs_fetch_failed_envelope, unregister_args, unregister_failed_envelope,
     user_create_failed_envelope, verify_checksum,
 };
+#[cfg(windows)]
+pub use windows_provision::WindowsProvisionOps;
 
 use cowork_errors::{Code, Envelope, Stage};
 

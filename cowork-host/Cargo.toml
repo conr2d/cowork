@@ -27,6 +27,8 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_Services",
     "Win32_System_SystemServices",
     "Win32_UI_Shell",
+    "Win32_Networking_WinHttp",
 ] }
 wmi = "0.18"
 winreg = "0.56"
+sha2 = "0.10"

@@ -41,13 +41,9 @@
 		"toolchain.node_install_failed": { "kind": "Transient", "contextKeys": ["version", "exitCode"] },
 		"toolchain.shellrc_write_failed": { "kind": "Internal", "contextKeys": ["file"] },
 
-		"agent.claude_install_failed": { "kind": "Transient", "contextKeys": ["exitCode"] },
-		"agent.antigravity_install_failed": { "kind": "Transient", "contextKeys": ["exitCode"] },
+		"agent.install_failed": { "kind": "Transient", "contextKeys": ["agent", "exitCode"] },
 		"agent.installer_download_failed": { "kind": "Transient", "contextKeys": ["agent", "url", "httpStatus"] },
 		"agent.installer_hang": { "kind": "Internal", "contextKeys": ["agent"] },
-		"agent.npm_install_failed": { "kind": "Transient", "contextKeys": ["package", "exitCode"] },
-		"agent.node_incompatible": { "kind": "Internal", "contextKeys": ["package", "requiredRange", "nodeVersion"] },
-		"agent.pkgfile_write_failed": { "kind": "Internal", "contextKeys": ["path"] },
 		"agent.binary_not_found": { "kind": "Internal", "contextKeys": ["agent", "expectedPath"] },
 		"agent.integrity_check_failed": { "kind": "Internal", "contextKeys": ["agent"] },
 

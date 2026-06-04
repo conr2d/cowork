@@ -32,3 +32,8 @@ windows-sys = { version = "0.61", features = [
 wmi = "0.18"
 winreg = "0.56"
 sha2 = "0.10"
+# ConPTY-backed pseudo-console for the embedded terminal (WP8). Windows-only:
+# the pure PTY command/env construction in `pty::command` has no portable-pty
+# dependency, so the Linux unit build and the host/guest-separation gate are
+# unaffected.
+portable-pty = "0.9"

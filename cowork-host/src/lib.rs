@@ -5,9 +5,10 @@
 //!
 //! One module per setup phase. WP3: [`preflight`]. WP4: [`wsl`]. WP5:
 //! [`protocol`] (guest JSON-lines stream parser) + [`provision`] (distro
-//! provisioning).
+//! provisioning). WP8: [`pty`] (embedded-terminal ConPTY bridge).
 
 pub mod preflight;
 pub mod protocol;
 pub mod provision;
+pub mod pty;
 pub mod wsl;

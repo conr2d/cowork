@@ -8,12 +8,15 @@
 //! ports as-is to any future host driver.
 
 mod bootstrap;
+mod cmd;
+mod sink;
 
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 
-use bootstrap::{BootstrapOutcome, Config, LinuxOps, StdoutSink, run_bootstrap};
+use bootstrap::{BootstrapOutcome, Config, LinuxOps, run_bootstrap};
+use sink::StdoutSink;
 
 #[derive(Parser)]
 #[command(

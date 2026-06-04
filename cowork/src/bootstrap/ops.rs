@@ -7,7 +7,7 @@
 
 use std::io::Write;
 
-use super::command::Cmd;
+use crate::cmd::Cmd;
 
 /// Result of running one [`Cmd`].
 #[derive(Debug, Clone)]

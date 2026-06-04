@@ -6,6 +6,8 @@
 
 use cowork_errors::{Code, Envelope, Stage};
 
+use crate::cmd::Cmd;
+
 /// Homebrew's official default install prefix on Linux x86_64.
 pub const BREW_PREFIX: &str = "/home/linuxbrew/.linuxbrew";
 /// Absolute path of the `brew` binary once installed; used as an idempotency probe.
@@ -29,31 +31,6 @@ pub mod step {
     pub const SHELLRC: &str = "shellrc";
     pub const LOCALES: &str = "locale-gen";
     pub const WORKSPACE: &str = "workspace";
-}
-
-/// A fully-specified command to run: program, args, and extra environment.
-/// Pure data — the [`super::ops::BootstrapOps`] impl turns it into a process.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Cmd {
-    pub program: String,
-    pub args: Vec<String>,
-    /// Extra environment variables (applied on top of the inherited environment).
-    pub env: Vec<(String, String)>,
-}
-
-impl Cmd {
-    fn new(program: &str, args: &[&str]) -> Self {
-        Self {
-            program: program.to_string(),
-            args: args.iter().map(|s| s.to_string()).collect(),
-            env: Vec::new(),
-        }
-    }
-
-    fn with_env(mut self, key: &str, value: &str) -> Self {
-        self.env.push((key.to_string(), value.to_string()));
-        self
-    }
 }
 
 /// `sudo apt-get update` — refresh package lists before installing prerequisites.

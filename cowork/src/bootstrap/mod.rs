@@ -17,16 +17,15 @@
 
 mod command;
 mod ops;
-mod sink;
 
 use cowork_errors::Envelope;
 use cowork_errors::Stage;
 use cowork_errors::protocol::{Message, PROTOCOL_VERSION};
 
 pub use ops::{BootstrapOps, ExecOutcome, LinuxOps};
-pub use sink::{ProgressSink, StdoutSink};
 
-use command::Cmd;
+use crate::cmd::Cmd;
+use crate::sink::ProgressSink;
 
 /// What the bootstrap was asked to do.
 pub struct Config {

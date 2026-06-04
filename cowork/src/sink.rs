@@ -1,6 +1,7 @@
-//! Progress emission seam. The orchestration emits [`Message`]s through a
-//! `&mut dyn ProgressSink`; the real sink serializes one JSON object per line to
-//! stdout (the guest→host wire protocol), while tests collect them.
+//! Progress emission seam, shared by the guest's setup modules. The
+//! orchestration emits [`Message`]s through a `&mut dyn ProgressSink`; the real
+//! sink serializes one JSON object per line to stdout (the guest→host wire
+//! protocol), while tests collect them.
 
 use cowork_errors::protocol::Message;
 

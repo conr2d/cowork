@@ -1,6 +1,6 @@
 [package]
-name = "cowork-preflight"
-description = "Cowork host-side preflight checks. Tauri-independent so the decision logic is unit-testable off-Windows; the cfg(windows) probe is the only OS-specific part."
+name = "cowork-host"
+description = "Cowork host-side setup logic (preflight, WSL enable, distro provision, ...). Tauri-independent so decision logic is unit-testable off-Windows; the cfg(windows) parts are the only OS-specific code."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,7 +9,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [lib]
-name = "cowork_preflight"
+name = "cowork_host"
 path = "src/lib.rs"
 
 [dependencies]

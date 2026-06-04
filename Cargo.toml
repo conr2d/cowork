@@ -4,7 +4,7 @@ members = [
     "src-tauri",
     "cowork",
     "cowork-errors",
-    "cowork-preflight",
+    "cowork-host",
 ]
 
 [workspace.package]

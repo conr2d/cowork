@@ -1,7 +1,7 @@
 use cowork_errors::{Code, Envelope, Stage};
 use serde::{Deserialize, Serialize};
 
-use crate::probe::{ARCH_ARM64, ARCH_X64, RawFacts};
+use super::probe::{ARCH_ARM64, ARCH_X64, RawFacts};
 
 /// The 9 preflight checks, in stable display order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

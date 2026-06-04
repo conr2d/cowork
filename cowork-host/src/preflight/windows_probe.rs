@@ -5,7 +5,7 @@ use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use std::ptr::{null, null_mut};
 
-use crate::probe::{ElevationFacts, RawFacts, SystemProbe};
+use super::probe::{ElevationFacts, RawFacts, SystemProbe};
 
 pub struct WindowsProbe;
 

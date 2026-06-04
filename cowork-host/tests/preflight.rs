@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use cowork_errors::{Code, Envelope, Kind, Stage};
-use cowork_preflight::{
+use cowork_host::preflight::{
     ARCH_ARM64, ARCH_X64, CheckId, CheckStatus, ElevationFacts, PreflightReport, RawFacts,
     StaticProbe, decide, run_preflight,
 };

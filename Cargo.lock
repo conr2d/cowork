@@ -661,7 +661,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "cowork-preflight"
+name = "cowork-host"
 version = "0.1.0-dev"
 dependencies = [
  "cowork-errors",

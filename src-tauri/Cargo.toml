@@ -30,3 +30,11 @@ tauri-plugin-opener = "2"
 tauri-plugin-fs = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }
+# Host driver logic (PTY session, wsl.exe, preflight, …) lives in cowork-host;
+# src-tauri is the thin Tauri command/event layer over it. cowork-errors gives
+# the structured Envelope returned from commands to the localizing frontend.
+cowork-host = { path = "../cowork-host" }
+cowork-errors = { path = "../cowork-errors" }
+# Base64-encode raw PTY output bytes for the Channel<String> stream (lossless
+# across UTF-8 chunk boundaries; smaller JSON than an integer array).
+base64 = "0.22"

@@ -39,7 +39,10 @@ Thumbs.db
 
 # Cowork local state (when dev-running)
 .cowork/
+
+# AI coding-agent runtime state (never committed): .omc = Claude, .omx = Codex
 .omc/
+.omx/
 
 # Logs
 *.log

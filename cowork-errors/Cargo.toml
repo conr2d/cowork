@@ -1,0 +1,21 @@
+[package]
+name = "cowork-errors"
+description = "Cowork error model — single-source error codes (codegen from errors.json), envelope, redaction"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "cowork_errors"
+path = "src/lib.rs"
+
+[build-dependencies]
+serde_json = { workspace = true }
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+regex = { workspace = true }

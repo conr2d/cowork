@@ -25,6 +25,7 @@ jobs:
       - run: pnpm check
       - run: pnpm lint
       - run: pnpm build
+      - run: pnpm test
 
   # Guest CLI (`cowork`): host-agnostic, verified on Linux (its real runtime is WSL).
   guest:
@@ -39,6 +40,9 @@ jobs:
       - run: cargo clippy -p cowork --all-targets -- -D warnings
       - run: cargo test -p cowork
       - run: cargo build -p cowork
+      - run: cargo clippy -p cowork-errors --all-targets -- -D warnings
+      - run: cargo test -p cowork-errors
+      - run: cargo build -p cowork-errors
 
   # Conformance gates (the unit-seal gate). WP0: host/guest separation.
   # WP2 adds the errors.json single-source + 3-locale parity check here.

@@ -17,7 +17,7 @@ import json
 import subprocess
 import sys
 
-GUEST_PACKAGE = "cowork"
+GUEST_PACKAGES = ["cowork", "cowork-errors"]
 
 # The guest runs inside WSL (Linux). We resolve dependencies for a Linux target
 # so that Windows-only, `cfg(windows)`-gated transitive deps (e.g. clap pulls
@@ -56,39 +56,46 @@ def main() -> int:
     id_to_name = {p["id"]: p["name"] for p in meta["packages"]}
     nodes = {n["id"]: n for n in meta["resolve"]["nodes"]}
 
-    guest_ids = [pid for pid, name in id_to_name.items() if name == GUEST_PACKAGE]
-    if not guest_ids:
-        print(f"FAIL: package '{GUEST_PACKAGE}' not found in workspace metadata", file=sys.stderr)
-        return 2
+    for guest_package in GUEST_PACKAGES:
+        guest_ids = [pid for pid, name in id_to_name.items() if name == guest_package]
+        if not guest_ids:
+            print(f"FAIL: package '{guest_package}' not found in workspace metadata", file=sys.stderr)
+            return 2
 
-    # BFS the dependency closure of the guest package.
-    closure: set[str] = set()
-    stack = list(guest_ids)
-    while stack:
-        pid = stack.pop()
-        if pid in closure:
-            continue
-        closure.add(pid)
-        for dep in nodes.get(pid, {}).get("deps", []):
-            stack.append(dep["pkg"])
+        # BFS the dependency closure of the guest package.
+        closure: set[str] = set()
+        stack = list(guest_ids)
+        while stack:
+            pid = stack.pop()
+            if pid in closure:
+                continue
+            closure.add(pid)
+            for dep in nodes.get(pid, {}).get("deps", []):
+                stack.append(dep["pkg"])
 
-    violations = sorted(
-        {id_to_name[pid] for pid in closure if pid in id_to_name and is_forbidden(id_to_name[pid])}
-    )
-
-    if violations:
-        print("FAIL: host/guest separation violated.", file=sys.stderr)
-        print(
-            f"  The '{GUEST_PACKAGE}' guest CLI must not depend on Windows-API crates,",
-            file=sys.stderr,
+        violations = sorted(
+            {
+                id_to_name[pid]
+                for pid in closure
+                if pid in id_to_name and is_forbidden(id_to_name[pid])
+            }
         )
-        print("  but its dependency closure includes:", file=sys.stderr)
-        for v in violations:
-            print(f"    - {v}", file=sys.stderr)
-        return 1
 
-    print(f"OK: '{GUEST_PACKAGE}' dependency closure is free of Windows-API crates "
-          f"({len(closure)} crates checked).")
+        if violations:
+            print("FAIL: host/guest separation violated.", file=sys.stderr)
+            print(
+                f"  The '{guest_package}' guest CLI must not depend on Windows-API crates,",
+                file=sys.stderr,
+            )
+            print("  but its dependency closure includes:", file=sys.stderr)
+            for v in violations:
+                print(f"    - {v}", file=sys.stderr)
+            return 1
+
+        print(
+            f"OK: '{guest_package}' dependency closure is free of Windows-API crates "
+            f"({len(closure)} crates checked)."
+        )
     return 0
 
 

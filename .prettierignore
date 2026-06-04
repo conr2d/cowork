@@ -1,6 +1,10 @@
 # Tooling state (not ours to format)
 .claude/
 .omc/
+.omx/
+
+# Single-source data file — hand-curated grouping, exempt from reformatting
+errors.json
 
 # Generated / vendored
 build/

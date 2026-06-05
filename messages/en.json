@@ -31,5 +31,8 @@
 	"error_cause_label": "Details",
 	"error_log_hint": "Diagnostics are saved under {path}.",
 	"error_retry": "Try again",
-	"error_retrying": "Retrying…"
+	"error_retrying": "Retrying…",
+	"auth_title": "Sign in to your agents",
+	"auth_body": "Select an agent to start its login in the terminal below, then follow the on-screen steps.",
+	"auth_login": "Log in to {agent}"
 }

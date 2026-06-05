@@ -30,5 +30,8 @@
 	"error_cause_label": "세부 정보",
 	"error_log_hint": "진단 정보는 {path}에 저장됩니다.",
 	"error_retry": "다시 시도",
-	"error_retrying": "다시 시도 중…"
+	"error_retrying": "다시 시도 중…",
+	"auth_title": "에이전트에 로그인",
+	"auth_body": "아래 터미널에서 로그인을 시작할 에이전트를 선택한 후 화면의 안내를 따르세요.",
+	"auth_login": "{agent} 로그인"
 }

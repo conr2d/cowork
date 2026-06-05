@@ -17,3 +17,8 @@ export function loginCommand(agent: AgentId): string {
 			return 'agy';
 	}
 }
+
+/** The full line sent to the PTY to start an agent's login (command + newline). */
+export function loginInput(agent: AgentId): string {
+	return `${loginCommand(agent)}\n`;
+}

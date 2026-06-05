@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import * as m from '$lib/paraglide/messages';
 	import type { Wizard } from './store.svelte';
 	import AgentStep from './AgentStep.svelte';
+	import AuthStep from './AuthStep.svelte';
 	import LanguageStep from './LanguageStep.svelte';
 	import RunnerView from './RunnerView.svelte';
 
@@ -24,12 +24,7 @@
 		onContinue={() => wizard.next()}
 	/>
 {:else if wizard.step === 'auth' || wizard.step === 'done'}
-	<!-- Auth/terminal handoff scaffold. WP9④ wires Terminal.svelte + loginCommand. -->
-	<main
-		class="flex min-h-screen flex-col items-center justify-center gap-2 bg-neutral-50 text-neutral-900"
-	>
-		<p class="text-sm text-neutral-500">{m.wizard_setup_preparing()}</p>
-	</main>
+	<AuthStep agents={wizard.selectedAgents} />
 {:else}
 	<RunnerView {wizard} />
 {/if}

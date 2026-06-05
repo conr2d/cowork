@@ -30,5 +30,8 @@
 	"error_cause_label": "詳細",
 	"error_log_hint": "診断情報は {path} に保存されます。",
 	"error_retry": "再試行",
-	"error_retrying": "再試行中…"
+	"error_retrying": "再試行中…",
+	"auth_title": "エージェントにサインイン",
+	"auth_body": "下のターミナルでログインを開始するエージェントを選び、画面の手順に従ってください。",
+	"auth_login": "{agent} にログイン"
 }

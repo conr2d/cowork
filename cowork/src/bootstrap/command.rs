@@ -17,8 +17,16 @@ pub const BREW_INSTALL_URL: &str =
     "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh";
 /// mise's official short installer URL (redirects to the hosted install script).
 pub const MISE_INSTALL_URL: &str = "https://mise.run";
-/// apt prerequisites Homebrew's Linux docs require.
-pub const APT_PACKAGES: &[&str] = &["build-essential", "procps", "curl", "file", "git"];
+/// apt prerequisites: Homebrew's Linux build dependencies, plus `locales` (which
+/// provides `locale-gen` — not guaranteed present on a minimal base image).
+pub const APT_PACKAGES: &[&str] = &[
+    "build-essential",
+    "procps",
+    "curl",
+    "file",
+    "git",
+    "locales",
+];
 /// Locales generated for the ja/ko/en trilingual product.
 pub const LOCALES: &[&str] = &["ja_JP.UTF-8", "ko_KR.UTF-8", "en_US.UTF-8"];
 
@@ -225,7 +233,7 @@ mod tests {
         assert_eq!(e.code, Code::ToolchainPrereqAptFailed);
         assert_eq!(
             e.context.get("packages").map(String::as_str),
-            Some("build-essential procps curl file git")
+            Some("build-essential procps curl file git locales")
         );
     }
 

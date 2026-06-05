@@ -83,3 +83,47 @@ jobs:
       # and clippy it on the real Windows target.
       - run: cargo build -p cowork-host
       - run: cargo clippy -p cowork-host --all-targets -- -D warnings
+
+  # WP10 PR smoke gate (guest half): run the REAL bootstrap + agent install on a
+  # clean Ubuntu 24.04 — the same base as the provisioned distro — as a non-root
+  # user with passwordless sudo (mirroring the distro's firstboot user). This is
+  # the throwaway clean-room the WP7 happy-path was deferred to: it exercises the
+  # real external installers (the top v0.1 failure variable) and the full bootstrap
+  # that the unit tests (command construction only) cannot. No login — OAuth is
+  # interactive and lives in the Hyper-V full gate.
+  guest-e2e:
+    runs-on: ubuntu-latest
+    container: ubuntu:24.04
+    steps:
+      # git for checkout, build-essential for cargo, sudo/curl for the bootstrap;
+      # the remaining apt prerequisites are installed by the bootstrap itself.
+      - name: Base tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git sudo curl ca-certificates build-essential
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p cowork --release
+      - name: Install the guest binary + a firstboot-like user
+        run: |
+          install -m 0755 target/release/cowork /usr/local/bin/cowork
+          useradd -m -s /bin/bash cowork
+          echo 'cowork ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/cowork
+      - name: Bootstrap + install codex (no login)
+        run: |
+          sudo -u cowork -i cowork bootstrap
+          sudo -u cowork -i cowork agent-install --agent codex
+      # Assert by absolute path (a non-interactive shell returns early from the
+      # default ~/.bashrc, so brew/mise are not on PATH here — that is expected;
+      # the real terminal is interactive).
+      - name: Assert the happy path
+        run: |
+          sudo -u cowork -i bash -c '
+            set -euo pipefail
+            test -d "$HOME/cowork"
+            test -x /home/linuxbrew/.linuxbrew/bin/brew
+            test -x "$HOME/.local/bin/mise"
+            test -x "$HOME/.local/bin/codex"
+            grep -q CODEX_HOME "$HOME/.bashrc"
+          '

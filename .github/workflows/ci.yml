@@ -121,7 +121,7 @@ jobs:
         run: |
           sudo -u cowork -i bash -c '
             set -euo pipefail
-            test -d "$HOME/cowork"
+            test -d "$HOME/workspaces/default"
             test -x /home/linuxbrew/.linuxbrew/bin/brew
             test -x "$HOME/.local/bin/mise"
             test -x "$HOME/.local/bin/codex"
@@ -203,7 +203,7 @@ jobs:
       - name: Assert the happy path inside real WSL (by absolute path)
         shell: pwsh
         run: |
-          wsl -d Cowork -u cowork -- bash -c 'set -euo pipefail; test -d "$HOME/cowork" && test -x /home/linuxbrew/.linuxbrew/bin/brew && test -x "$HOME/.local/bin/mise" && test -x "$HOME/.local/bin/codex" && grep -q CODEX_HOME "$HOME/.bashrc"'
+          wsl -d Cowork -u cowork -- bash -c 'set -euo pipefail; test -d "$HOME/workspaces/default" && test -x /home/linuxbrew/.linuxbrew/bin/brew && test -x "$HOME/.local/bin/mise" && test -x "$HOME/.local/bin/codex" && grep -q CODEX_HOME "$HOME/.bashrc"'
       - name: Unregister the distro (validate the Remove Cowork teardown)
         if: always()
         shell: pwsh

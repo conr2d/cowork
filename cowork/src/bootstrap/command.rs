@@ -105,10 +105,12 @@ pub fn shellrc_path(home: &str) -> String {
     format!("{home}/.bashrc")
 }
 
-/// The default workspace directory created during bootstrap; the seed for v0.2
-/// per-workspace isolation.
+/// The default workspace directory created during bootstrap: `<home>/workspaces/default`.
+/// Workspaces live under a `workspaces/` container (one per agent session, created
+/// repeatedly); `default` is the single workspace seeded in v0.1. The container shape
+/// is the seed for v0.2 per-workspace isolation — siblings are added with no migration.
 pub fn workspace_path(home: &str) -> String {
-    format!("{home}/cowork")
+    format!("{home}/workspaces/default")
 }
 
 /// The two PATH-activation lines appended to the shellrc (brew first, then mise).
@@ -224,7 +226,7 @@ mod tests {
     fn paths_are_home_relative() {
         assert_eq!(mise_bin("/home/u"), "/home/u/.local/bin/mise");
         assert_eq!(shellrc_path("/home/u"), "/home/u/.bashrc");
-        assert_eq!(workspace_path("/home/u"), "/home/u/cowork");
+        assert_eq!(workspace_path("/home/u"), "/home/u/workspaces/default");
     }
 
     #[test]

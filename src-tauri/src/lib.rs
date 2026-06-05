@@ -12,6 +12,7 @@
 //! so a future Mac/Linux host is "write a new host driver", not a rewrite.
 
 mod pty;
+mod setup;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -24,6 +25,15 @@ pub fn run() {
             pty::pty_write,
             pty::pty_resize,
             pty::pty_kill,
+            setup::preflight_run,
+            setup::wsl_enable,
+            setup::provision_run,
+            setup::guest_bootstrap,
+            setup::guest_agent_install,
+            setup::remove_cowork_distro,
+            setup::is_resume_launch,
+            setup::get_resume_state,
+            setup::clear_resume,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

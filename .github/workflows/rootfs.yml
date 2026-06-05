@@ -1,0 +1,40 @@
+name: Publish rootfs
+
+# Manual: download Canonical's pinned Ubuntu 24.04 WSL rootfs, verify its digest,
+# and re-host it byte-identically on the Cowork release the app fetches from. This
+# avoids a Microsoft Store dependency and pins a known-good image. Because the
+# re-host is byte-identical, the published asset's SHA-256 equals ROOTFS_SHA256 in
+# cowork-host/src/provision/mod.rs — keep SHA256 below in sync with that constant.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # Canonical's stable WSL rootfs channel for noble (24.04). "current" always
+  # resolves; if Canonical rotates the image its bytes change and the verify step
+  # below fails loudly (it never publishes an unpinned image) — bump SHA256 here
+  # and ROOTFS_SHA256 together, then re-run.
+  SOURCE_URL: https://cloud-images.ubuntu.com/wsl/releases/noble/current/ubuntu-noble-wsl-amd64-wsl.rootfs.tar.gz
+  SHA256: 8251e27ffff381a4af5f41dcb94d867de3e0d9774a9241908ab34555d99315ea
+  RELEASE_TAG: rootfs-ubuntu-24.04
+  ASSET_NAME: cowork-ubuntu-24.04-rootfs.tar.gz
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Canonical rootfs
+        run: curl -fSL "$SOURCE_URL" -o "$ASSET_NAME"
+      - name: Verify SHA-256 (must match the pinned digest)
+        run: echo "$SHA256  $ASSET_NAME" | sha256sum -c -
+      - name: Publish to the Cowork release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+                 --title "Ubuntu 24.04 WSL rootfs (pinned mirror)" \
+                 --notes "Byte-identical re-host of Canonical's ubuntu-noble-wsl-amd64-wsl.rootfs.tar.gz (SHA-256 $SHA256). Source: $SOURCE_URL"
+          gh release upload "$RELEASE_TAG" "$ASSET_NAME" --repo "$GITHUB_REPOSITORY" --clobber

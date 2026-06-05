@@ -33,12 +33,14 @@ use cowork_errors::{Code, Envelope, Stage};
 pub const DISTRO_NAME: &str = "Cowork";
 /// The Store image used only for the fallback `--install --name` path.
 pub const FALLBACK_STORE_DISTRO: &str = "Ubuntu-24.04";
-/// Pinned vanilla Ubuntu 24.04 rootfs on the Cowork GitHub Releases mirror.
-/// TODO: replace with the real release asset URL once it is uploaded.
+/// Pinned Ubuntu 24.04 WSL rootfs, re-hosted byte-identically on the Cowork
+/// GitHub release by `.github/workflows/rootfs.yml` (avoids a Microsoft Store
+/// dependency and pins a known-good image). The digest below is Canonical's for
+/// `ubuntu-noble-wsl-amd64-wsl.rootfs.tar.gz`; keep both in sync with that
+/// workflow (the re-host is byte-identical, so the digest is unchanged).
 pub const ROOTFS_URL: &str = "https://github.com/conr2d/cowork/releases/download/rootfs-ubuntu-24.04/cowork-ubuntu-24.04-rootfs.tar.gz";
-/// SHA-256 of the pinned rootfs (hex).
-/// TODO: replace with the real digest once the asset is uploaded.
-pub const ROOTFS_SHA256: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+/// SHA-256 of the pinned rootfs (hex), from Canonical's official SHA256SUMS.
+pub const ROOTFS_SHA256: &str = "8251e27ffff381a4af5f41dcb94d867de3e0d9774a9241908ab34555d99315ea";
 
 /// Result of one `wsl.exe` invocation in provisioning. Unlike WSL enablement,
 /// these run unelevated (WSL is already enabled by WP4), so there is no

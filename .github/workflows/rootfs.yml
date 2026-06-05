@@ -36,5 +36,5 @@ jobs:
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
             || gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
                  --title "Ubuntu 24.04 WSL rootfs (pinned mirror)" \
-                 --notes "Byte-identical re-host of Canonical's ubuntu-noble-wsl-amd64-wsl.rootfs.tar.gz (SHA-256 $SHA256). Source: $SOURCE_URL"
+                 --notes "Unmodified, byte-identical re-host of Canonical's ubuntu-noble-wsl-amd64-wsl.rootfs.tar.gz (SHA-256 $SHA256). Source: $SOURCE_URL. Contains software under GPL/LGPL/MIT/BSD and others; per-package license texts are preserved inside the image. Corresponding source is available from Ubuntu's archives (https://archive.ubuntu.com/ubuntu/, https://launchpad.net/ubuntu); see THIRD_PARTY_NOTICES.md. 'Ubuntu' is a trademark of Canonical Ltd.; this project is not affiliated with or endorsed by Canonical."
           gh release upload "$RELEASE_TAG" "$ASSET_NAME" --repo "$GITHUB_REPOSITORY" --clobber

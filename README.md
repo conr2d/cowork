@@ -52,7 +52,9 @@ pnpm tauri dev   # full behavior on Windows only
 
 ## License
 
-Apache-2.0. See [LICENSE](./LICENSE).
+Apache-2.0. See [LICENSE](./LICENSE). Cowork redistributes an unmodified Ubuntu
+WSL root filesystem during setup; see [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)
+for the corresponding-source offer and trademark notice.
 
 ## Contributing
 

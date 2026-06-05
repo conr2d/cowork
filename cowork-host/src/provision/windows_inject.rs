@@ -38,10 +38,19 @@ pub fn inject_guest(src_binary: &str) -> Result<(), Envelope> {
 }
 
 /// Run the injected guest with `extra` args, streaming its stdout JSON-lines
-/// through [`StreamParser`] (stamped with [`Stage::Provision`]), and classify
-/// the finished run. stderr is human-readable noise and is discarded; the
-/// protocol is stdout-only.
-pub fn run_guest(extra: &[String]) -> RunOutcome {
+/// through [`StreamParser`] (stamped with `stage`), forwarding each `Progress`
+/// event live to `on_progress`, and classifying the finished run. stderr is
+/// human-readable noise and is discarded; the protocol is stdout-only.
+///
+/// `stage` is the stage this run belongs to (`Toolchain` for `bootstrap`,
+/// `AgentInstall` for `agent-install`); it stamps protocol-fault envelopes and is
+/// the `classify_run` fallback. (WP5 originally hardcoded `Provision`; threading
+/// it here is the forward-dependency resolution noted in the plan.)
+pub fn run_guest(
+    stage: Stage,
+    extra: &[String],
+    on_progress: &mut dyn FnMut(Stage, &str),
+) -> RunOutcome {
     let mut child = match Command::new("wsl.exe")
         .args(launch_args(extra))
         .stdout(Stdio::piped())
@@ -54,10 +63,13 @@ pub fn run_guest(extra: &[String]) -> RunOutcome {
 
     let mut events = Vec::new();
     if let Some(stdout) = child.stdout.take() {
-        let mut parser = StreamParser::new(Stage::Provision);
+        let mut parser = StreamParser::new(stage);
         for line in BufReader::new(stdout).lines() {
             let Ok(line) = line else { break };
             if let Some(ev) = parser.push_line(&line) {
+                if let crate::protocol::HostEvent::Progress { stage, step } = &ev {
+                    on_progress(*stage, step);
+                }
                 events.push(ev);
             }
         }
@@ -67,5 +79,5 @@ pub fn run_guest(extra: &[String]) -> RunOutcome {
         Ok(status) => status.code().unwrap_or(-1),
         Err(_) => -1,
     };
-    classify_run(&events, exit_code, Stage::Provision)
+    classify_run(&events, exit_code, stage)
 }

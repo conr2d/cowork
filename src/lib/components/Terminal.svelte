@@ -33,6 +33,8 @@
 			const { ClipboardAddon } = await import('@xterm/addon-clipboard');
 			const { WebglAddon } = await import('@xterm/addon-webgl');
 			const { invoke, Channel } = await import('@tauri-apps/api/core');
+			const { WebLinksAddon } = await import('@xterm/addon-web-links');
+			const { openUrl } = await import('@tauri-apps/plugin-opener');
 
 			const term = new Terminal({
 				cursorBlink: true,
@@ -47,6 +49,15 @@
 			term.loadAddon(new Unicode11Addon());
 			term.unicode.activeVersion = '11';
 			term.loadAddon(new ClipboardAddon());
+			// Make URLs (e.g. an agent's OAuth login link) clickable → open in the
+			// host Windows browser via the opener plugin. This is the reliable
+			// handoff: WSL-side xdg-open/$BROWSER is unreliable (wslu was archived),
+			// so the host opens the browser, not the guest.
+			term.loadAddon(
+				new WebLinksAddon((_event, uri) => {
+					void openUrl(uri);
+				})
+			);
 
 			term.open(container);
 

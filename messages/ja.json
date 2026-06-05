@@ -6,5 +6,12 @@
 	"wizard_welcome_body": "このウィザードは、PCでAIコーディングエージェントを使うために必要なものをすべてセットアップします。",
 	"action_continue": "続ける",
 	"action_back": "戻る",
-	"disk_required": "Coworkには少なくとも{gib} GiBの空き容量が必要です。"
+	"disk_required": "Coworkには少なくとも{gib} GiBの空き容量が必要です。",
+	"wizard_agents_title": "コーディングエージェントを選択",
+	"wizard_agents_body": "インストールするAIコーディングエージェントを1つ以上選んでください。",
+	"wizard_agents_min_hint": "続けるには少なくとも1つのエージェントを選択してください。",
+	"wizard_setup_preparing": "セットアップを準備しています…",
+	"agent_claude_desc": "Anthropic の Claude Code。",
+	"agent_codex_desc": "OpenAI の Codex CLI。",
+	"agent_antigravity_desc": "Google の Antigravity CLI。"
 }

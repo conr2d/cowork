@@ -7,5 +7,12 @@
 	"action_continue": "Continue",
 	"action_back": "Back",
 	"disk_required": "Cowork needs at least {gib} GiB of free disk space.",
-	"fallback_probe": "This string exists only in English to verify base-locale fallback."
+	"fallback_probe": "This string exists only in English to verify base-locale fallback.",
+	"wizard_agents_title": "Choose your coding agents",
+	"wizard_agents_body": "Pick one or more AI coding agents to install.",
+	"wizard_agents_min_hint": "Select at least one agent to continue.",
+	"wizard_setup_preparing": "Preparing setup…",
+	"agent_claude_desc": "Claude Code by Anthropic.",
+	"agent_codex_desc": "Codex CLI by OpenAI.",
+	"agent_antigravity_desc": "Antigravity CLI by Google."
 }

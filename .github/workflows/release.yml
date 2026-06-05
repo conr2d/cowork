@@ -1,0 +1,66 @@
+name: Release
+
+# Manual (workflow_dispatch) or tag-triggered. NOT run per push — this packages
+# Cowork.exe with the guest binary embedded, which is the expensive path.
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Cross-compile the guest CLI as a static musl x64 binary; the app embeds it.
+  guest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p cowork --release --target x86_64-unknown-linux-musl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: guest-musl-x64
+          path: target/x86_64-unknown-linux-musl/release/cowork
+          if-no-files-found: error
+
+  # Build Cowork.exe with the guest binary embedded (embed-guest feature). The
+  # guest artifact is downloaded and pointed to by COWORK_GUEST_BIN, which
+  # build.rs stages into OUT_DIR for include_bytes!.
+  app:
+    needs: guest
+    runs-on: windows-latest
+    env:
+      COWORK_GUEST_BIN: ${{ github.workspace }}/guest-bin/cowork
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: guest-musl-x64
+          path: guest-bin
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: pnpm install --frozen-lockfile
+      # tauri build runs the frontend build (beforeBuildCommand) then cargo build
+      # with the embed-guest feature; --bundles nsis keeps the installer to NSIS
+      # (avoids the flakier WiX/MSI path). The standalone exe is cowork-app.exe.
+      - run: pnpm tauri build --features embed-guest --bundles nsis
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cowork-windows-x64
+          path: |
+            target/release/cowork-app.exe
+            target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error

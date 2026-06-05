@@ -21,6 +21,13 @@ crate-type = ["lib", "cdylib", "staticlib"]
 name = "cowork-app"
 path = "src/main.rs"
 
+[features]
+# Embed the cross-compiled guest `cowork` binary (musl x64) into the app via
+# build.rs + include_bytes!. Off by default so dev builds and the CI host job
+# compile without a prebuilt guest. The release workflow enables it and sets
+# COWORK_GUEST_BIN to the musl artifact path.
+embed-guest = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

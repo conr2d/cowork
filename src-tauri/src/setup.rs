@@ -75,13 +75,51 @@ fn resume_state_path() -> Result<PathBuf, Envelope> {
     Ok(dir)
 }
 
+/// The host-side directory the embedded guest binary is extracted into
+/// (`%LOCALAPPDATA%\Cowork\guest`). Created if missing.
+#[cfg(feature = "embed-guest")]
+fn guest_extract_dir() -> Result<PathBuf, Envelope> {
+    let base = std::env::var_os("LOCALAPPDATA").ok_or_else(|| {
+        Envelope::new(Code::GuestCliInjectFailed, Stage::Provision)
+            .with_context("detail", "LOCALAPPDATA is not set")
+    })?;
+    let mut dir = PathBuf::from(base);
+    dir.push("Cowork");
+    dir.push("guest");
+    std::fs::create_dir_all(&dir).map_err(|e| {
+        Envelope::new(Code::GuestCliInjectFailed, Stage::Provision)
+            .with_context("detail", format!("create {}: {e}", dir.display()))
+    })?;
+    Ok(dir)
+}
+
 /// Resolve the host-side guest binary to inject into the distro.
 ///
-/// PROVENANCE SEAM (placeholder): the guest `cowork` binary is cross-compiled for
-/// the distro and embedded in the app in a later unit. Until then this honors an
-/// optional `COWORK_GUEST_BIN` path (used by clean-room/e2e harnesses) and
-/// otherwise reports `guest.cli_inject_failed`. The provenance unit replaces this
-/// body with `include_bytes!`-based extraction; the call site does not change.
+/// PROVENANCE: with the `embed-guest` feature the cross-compiled musl guest
+/// `cowork` binary is embedded at build time (build.rs stages it into OUT_DIR)
+/// and extracted here to `%LOCALAPPDATA%\Cowork\guest\cowork`; `inject_guest`
+/// then copies it into the distro. An explicit `COWORK_GUEST_BIN` path always
+/// wins (used by clean-room/e2e harnesses). Without the feature and without the
+/// override, this reports `guest.cli_inject_failed`.
+#[cfg(feature = "embed-guest")]
+fn resolve_guest_binary() -> Result<String, Envelope> {
+    if let Some(p) = std::env::var_os("COWORK_GUEST_BIN") {
+        return Ok(p.to_string_lossy().into_owned());
+    }
+    const GUEST_BIN: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/cowork-guest"));
+    let dest = guest_extract_dir()?.join("cowork");
+    std::fs::write(&dest, GUEST_BIN).map_err(|e| {
+        Envelope::new(Code::GuestCliInjectFailed, Stage::Provision).with_context(
+            "detail",
+            format!("write guest binary {}: {e}", dest.display()),
+        )
+    })?;
+    Ok(dest.to_string_lossy().into_owned())
+}
+
+/// See the `embed-guest` variant above. Without that feature, only an explicit
+/// `COWORK_GUEST_BIN` override provides a guest binary.
+#[cfg(not(feature = "embed-guest"))]
 fn resolve_guest_binary() -> Result<String, Envelope> {
     if let Some(p) = std::env::var_os("COWORK_GUEST_BIN") {
         return Ok(p.to_string_lossy().into_owned());
@@ -89,7 +127,7 @@ fn resolve_guest_binary() -> Result<String, Envelope> {
     Err(
         Envelope::new(Code::GuestCliInjectFailed, Stage::Provision).with_context(
             "detail",
-            "guest binary not provisioned (provenance pending)",
+            "guest binary not embedded (build with --features embed-guest)",
         ),
     )
 }

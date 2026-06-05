@@ -127,3 +127,84 @@ jobs:
             test -x "$HOME/.local/bin/codex"
             grep -q CODEX_HOME "$HOME/.bashrc"
           '
+
+  # WP10 ② wsl-integration (non-required follow-up): exercise the REAL WSL2 path on
+  # a hosted windows-2025 runner (`windows-latest` migrated to 2025; WSL2 works here
+  # — the "WSL2 is not supported" report is Azure-DevOps-only). This covers the
+  # host<->guest substrate the docker-based guest-e2e cannot: a genuine `wsl --import`
+  # of the published rootfs (new .tar.gz format, supported on WSL >= 2.4.4), the
+  # guest binary injected through the host's own \\wsl.localhost\Cowork copy path
+  # (the WP5 mechanism), the injected musl binary executing under the real WSL2
+  # kernel, and the `wsl --unregister` teardown (the Remove Cowork path). OAuth is
+  # interactive and stays in the Hyper-V full gate. continue-on-error until stable,
+  # then promote to required.
+  wsl-integration-guest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+      # The same static-pie musl binary the installer embeds — it runs as-is on the
+      # glibc WSL Ubuntu, so the real injected artifact is exercised, not a gnu rebuild.
+      - run: cargo build -p cowork --target x86_64-unknown-linux-musl --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wsl-guest-musl-x64
+          path: target/x86_64-unknown-linux-musl/release/cowork
+          if-no-files-found: error
+
+  wsl-integration:
+    needs: wsl-integration-guest
+    runs-on: windows-latest # = windows-2025
+    continue-on-error: true # non-required follow-up until proven stable
+    env:
+      WSL_UTF8: '1' # force wsl.exe UTF-8 output (default UTF-16LE corrupts captured logs)
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: wsl-guest-musl-x64
+          path: guest
+      - name: Ensure a modern WSL (>= 2.4.4 for .tar.gz import) defaulting to v2
+        shell: pwsh
+        run: |
+          wsl --update
+          wsl --version
+          wsl --set-default-version 2
+      - name: Download the published Cowork rootfs
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download rootfs-ubuntu-24.04 --repo $env:GITHUB_REPOSITORY `
+            --pattern cowork-ubuntu-24.04-rootfs.tar.gz --dir rootfs
+      - name: Import the Cowork distro (real wsl --import, new tar format)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path distro | Out-Null
+          wsl --import Cowork distro rootfs\cowork-ubuntu-24.04-rootfs.tar.gz --version 2
+          wsl -l -v
+          wsl -d Cowork -u root -- true # start once so \\wsl.localhost\Cowork is mounted
+      - name: Inject the guest binary via the host's \\wsl.localhost copy path
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path \\wsl.localhost\Cowork\usr\local\bin | Out-Null
+          Copy-Item guest\cowork \\wsl.localhost\Cowork\usr\local\bin\cowork -Force
+          wsl -d Cowork -u root -- chmod 0755 /usr/local/bin/cowork
+          wsl -d Cowork -u root -- /usr/local/bin/cowork --version
+      - name: Create a firstboot-like user, then bootstrap + install codex (no login)
+        shell: pwsh
+        run: |
+          wsl -d Cowork -u root -- useradd -m -s /bin/bash cowork
+          wsl -d Cowork -u root -- bash -c "echo 'cowork ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/cowork"
+          wsl -d Cowork -u cowork -- /usr/local/bin/cowork bootstrap
+          wsl -d Cowork -u cowork -- /usr/local/bin/cowork agent-install --agent codex
+      - name: Assert the happy path inside real WSL (by absolute path)
+        shell: pwsh
+        run: |
+          wsl -d Cowork -u cowork -- bash -c 'set -euo pipefail; test -d "$HOME/cowork" && test -x /home/linuxbrew/.linuxbrew/bin/brew && test -x "$HOME/.local/bin/mise" && test -x "$HOME/.local/bin/codex" && grep -q CODEX_HOME "$HOME/.bashrc"'
+      - name: Unregister the distro (validate the Remove Cowork teardown)
+        if: always()
+        shell: pwsh
+        run: wsl --unregister Cowork

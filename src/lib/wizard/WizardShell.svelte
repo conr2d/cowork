@@ -4,6 +4,7 @@
 	import type { Wizard } from './store.svelte';
 	import AgentStep from './AgentStep.svelte';
 	import LanguageStep from './LanguageStep.svelte';
+	import RunnerView from './RunnerView.svelte';
 
 	let { wizard }: { wizard: Wizard } = $props();
 
@@ -22,16 +23,13 @@
 		onBack={() => wizard.back()}
 		onContinue={() => wizard.next()}
 	/>
-{:else}
-	<!-- Runner phase scaffold. WP9③ replaces this with the 7-step runner and the
-	     per-kind error UI; for now it only confirms the store handed off correctly. -->
+{:else if wizard.step === 'auth' || wizard.step === 'done'}
+	<!-- Auth/terminal handoff scaffold. WP9④ wires Terminal.svelte + loginCommand. -->
 	<main
 		class="flex min-h-screen flex-col items-center justify-center gap-2 bg-neutral-50 text-neutral-900"
 	>
-		{#if wizard.resumeError}
-			<p class="text-sm text-neutral-500">{wizard.resumeError.code}</p>
-		{:else}
-			<p class="text-sm text-neutral-500">{m.wizard_setup_preparing()}</p>
-		{/if}
+		<p class="text-sm text-neutral-500">{m.wizard_setup_preparing()}</p>
 	</main>
+{:else}
+	<RunnerView {wizard} />
 {/if}

@@ -13,5 +13,22 @@
 	"wizard_setup_preparing": "설치를 준비하는 중…",
 	"agent_claude_desc": "Anthropic의 Claude Code.",
 	"agent_codex_desc": "OpenAI의 Codex CLI.",
-	"agent_antigravity_desc": "Google의 Antigravity CLI."
+	"agent_antigravity_desc": "Google의 Antigravity CLI.",
+	"runner_title": "Cowork 설치 중",
+	"runner_reboot_body": "계속하려면 PC를 다시 시작해야 합니다. 다시 시작하면 Cowork가 자동으로 이어집니다.",
+	"step_preflight": "PC 확인 중",
+	"step_wsl": "WSL 활성화 중",
+	"step_provision": "Linux 설치 중",
+	"step_toolchain": "도구 설치 중",
+	"step_agent_install": "에이전트 설치 중",
+	"error_title": "문제가 발생했습니다",
+	"error_blocker_body": "이 PC에서는 설치를 계속할 수 없습니다.",
+	"error_needs_action_body": "위 문제를 해결한 후 다시 시도하세요.",
+	"error_transient_body": "일시적인 문제가 발생했습니다. 자동으로 다시 시도합니다.",
+	"error_internal_body": "예기치 않은 오류가 발생했습니다. 다시 시도하거나 신고할 수 있습니다.",
+	"error_cancelled_body": "이 단계가 취소되었습니다.",
+	"error_cause_label": "세부 정보",
+	"error_log_hint": "진단 정보는 {path}에 저장됩니다.",
+	"error_retry": "다시 시도",
+	"error_retrying": "다시 시도 중…"
 }

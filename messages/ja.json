@@ -13,5 +13,22 @@
 	"wizard_setup_preparing": "セットアップを準備しています…",
 	"agent_claude_desc": "Anthropic の Claude Code。",
 	"agent_codex_desc": "OpenAI の Codex CLI。",
-	"agent_antigravity_desc": "Google の Antigravity CLI。"
+	"agent_antigravity_desc": "Google の Antigravity CLI。",
+	"runner_title": "Coworkをセットアップ中",
+	"runner_reboot_body": "続行するにはPCの再起動が必要です。再起動後、Coworkが自動的に再開します。",
+	"step_preflight": "PCを確認しています",
+	"step_wsl": "WSLを有効化しています",
+	"step_provision": "Linuxをセットアップしています",
+	"step_toolchain": "ツールをインストールしています",
+	"step_agent_install": "エージェントをインストールしています",
+	"error_title": "問題が発生しました",
+	"error_blocker_body": "このPCではセットアップを続行できません。",
+	"error_needs_action_body": "上記の問題を解決してから、もう一度お試しください。",
+	"error_transient_body": "一時的な問題が発生しました。自動的に再試行します。",
+	"error_internal_body": "予期しないエラーが発生しました。再試行するか報告できます。",
+	"error_cancelled_body": "このステップはキャンセルされました。",
+	"error_cause_label": "詳細",
+	"error_log_hint": "診断情報は {path} に保存されます。",
+	"error_retry": "再試行",
+	"error_retrying": "再試行中…"
 }

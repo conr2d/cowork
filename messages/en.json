@@ -14,5 +14,22 @@
 	"wizard_setup_preparing": "Preparing setup…",
 	"agent_claude_desc": "Claude Code by Anthropic.",
 	"agent_codex_desc": "Codex CLI by OpenAI.",
-	"agent_antigravity_desc": "Antigravity CLI by Google."
+	"agent_antigravity_desc": "Antigravity CLI by Google.",
+	"runner_title": "Setting up Cowork",
+	"runner_reboot_body": "Your PC needs to restart to continue. Cowork will resume automatically after it restarts.",
+	"step_preflight": "Checking your PC",
+	"step_wsl": "Enabling WSL",
+	"step_provision": "Setting up Linux",
+	"step_toolchain": "Installing tools",
+	"step_agent_install": "Installing agents",
+	"error_title": "Something went wrong",
+	"error_blocker_body": "Setup can't continue on this PC.",
+	"error_needs_action_body": "Please fix the issue above, then try again.",
+	"error_transient_body": "A temporary problem occurred. Retrying automatically.",
+	"error_internal_body": "An unexpected error occurred. You can retry or report it.",
+	"error_cancelled_body": "This step was cancelled.",
+	"error_cause_label": "Details",
+	"error_log_hint": "Diagnostics are saved under {path}.",
+	"error_retry": "Try again",
+	"error_retrying": "Retrying…"
 }

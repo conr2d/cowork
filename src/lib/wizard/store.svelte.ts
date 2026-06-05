@@ -1,32 +1,111 @@
-// The wizard's reactive state, built on Svelte 5 runes. Holds the current step
-// and the selected agents, exposes navigation, and bootstraps a reboot-resume
-// through the injected `HostClient`. Testable logic lives in the pure modules
-// `./agents` and `./steps`; this wrapper is verified by `svelte-check` + build.
+// The wizard's reactive state, built on Svelte 5 runes. Owns onboarding (step +
+// agent selection) and the setup runner (executing the host operations for the
+// preflight..agent-install stages, with per-kind retry). Testable decisions live
+// in the pure modules ./agents, ./steps, ./affordance, ./runner; this wrapper is
+// verified by svelte-check + build.
 
 import type { Envelope } from '$lib/errors/registry';
 import type { HostClient } from '$lib/host/client';
 import type { AgentId } from '$lib/terminal/login';
 import { asEnvelope } from '$lib/host/client';
 import { isValidSelection, parseAgentIds, toggleAgent } from './agents';
-import { initialStep, nextStep, prevStep, type WizardStep } from './steps';
+import { retryDelayMs, shouldAutoRetry } from './affordance';
+import { firstPreflightFailure, RUNNER_STEPS, type RunnerStep } from './runner';
+import { initialStep, isOnboardingStep, nextStep, prevStep, type WizardStep } from './steps';
 
 export interface Wizard {
 	readonly step: WizardStep;
 	readonly selectedAgents: readonly AgentId[];
 	readonly canProceed: boolean;
-	readonly resumeError: Envelope | null;
+	readonly error: Envelope | null;
+	readonly progress: string | null;
+	readonly running: boolean;
+	readonly rebooting: boolean;
+	readonly done: boolean;
 	toggleAgent(id: AgentId): void;
 	next(): void;
 	back(): void;
+	retry(): void;
 	bootstrap(): Promise<void>;
 }
 
 export function createWizard(host: HostClient): Wizard {
 	let step = $state<WizardStep>('language');
 	let selectedAgents = $state<AgentId[]>([]);
-	let resumeError = $state<Envelope | null>(null);
+	let error = $state<Envelope | null>(null);
+	let progress = $state<string | null>(null);
+	let running = $state(false);
+	let rebooting = $state(false);
+	let done = $state(false);
+	let attempt = $state(0);
 
 	const canProceed = $derived(step === 'agents' ? isValidSelection(selectedAgents) : true);
+
+	let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+	async function execute(def: RunnerStep): Promise<void> {
+		switch (def.id) {
+			case 'preflight': {
+				const report = await host.preflightRun();
+				const failure = firstPreflightFailure(report);
+				if (failure) throw failure;
+				return;
+			}
+			case 'wsl': {
+				const outcome = await host.wslEnable(selectedAgents);
+				if (outcome === 'RebootRequired') rebooting = true;
+				return;
+			}
+			case 'provision':
+				await host.provisionRun();
+				return;
+			case 'toolchain':
+				await host.guestBootstrap((event) => {
+					progress = event.step;
+				});
+				return;
+			case 'agentInstall':
+				await host.guestAgentInstall(selectedAgents, (event) => {
+					progress = event.step;
+				});
+				return;
+		}
+	}
+
+	function advance(): void {
+		step = nextStep(step);
+		if (RUNNER_STEPS.some((s) => s.id === step)) {
+			void runActive();
+		} else {
+			done = true;
+			void host.clearResume();
+		}
+	}
+
+	async function runActive(): Promise<void> {
+		const def = RUNNER_STEPS.find((s) => s.id === step);
+		if (!def) return;
+		running = true;
+		error = null;
+		progress = null;
+		try {
+			await execute(def);
+			running = false;
+			attempt = 0;
+			if (!rebooting) advance();
+		} catch (caught) {
+			running = false;
+			const envelope = asEnvelope(caught);
+			error = envelope;
+			attempt += 1;
+			if (shouldAutoRetry(envelope.kind, attempt)) {
+				retryTimer = setTimeout(() => {
+					retryTimer = null;
+					void runActive();
+				}, retryDelayMs(attempt));
+			}
+		}
+	}
 
 	return {
 		get step() {
@@ -38,17 +117,37 @@ export function createWizard(host: HostClient): Wizard {
 		get canProceed() {
 			return canProceed;
 		},
-		get resumeError() {
-			return resumeError;
+		get error() {
+			return error;
+		},
+		get progress() {
+			return progress;
+		},
+		get running() {
+			return running;
+		},
+		get rebooting() {
+			return rebooting;
+		},
+		get done() {
+			return done;
 		},
 		toggleAgent(id) {
 			selectedAgents = toggleAgent(selectedAgents, id);
 		},
 		next() {
 			step = nextStep(step);
+			if (!isOnboardingStep(step)) void runActive();
 		},
 		back() {
 			step = prevStep(step);
+		},
+		retry() {
+			if (retryTimer) {
+				clearTimeout(retryTimer);
+				retryTimer = null;
+			}
+			void runActive();
 		},
 		async bootstrap() {
 			try {
@@ -57,12 +156,13 @@ export function createWizard(host: HostClient): Wizard {
 					if (resume) {
 						selectedAgents = parseAgentIds(resume.selectedAgents);
 						step = initialStep(resume);
+						void runActive();
 						return;
 					}
 				}
 				step = initialStep(null);
-			} catch (error) {
-				resumeError = asEnvelope(error);
+			} catch (caught) {
+				error = asEnvelope(caught);
 			}
 		}
 	};

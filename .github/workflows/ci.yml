@@ -159,6 +159,7 @@ jobs:
     needs: wsl-integration-guest
     runs-on: windows-latest # = windows-2025
     continue-on-error: true # non-required follow-up until proven stable
+    timeout-minutes: 25 # hard cap: a stalled guest step must never run to the 6h job default
     env:
       WSL_UTF8: '1' # force wsl.exe UTF-8 output (default UTF-16LE corrupts captured logs)
     steps:
@@ -198,8 +199,16 @@ jobs:
         run: |
           wsl -d Cowork -u root -- useradd -m -s /bin/bash cowork
           wsl -d Cowork -u root -- bash -c "echo 'cowork ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/cowork"
-          wsl -d Cowork -u cowork -- /usr/local/bin/cowork bootstrap
-          wsl -d Cowork -u cowork -- /usr/local/bin/cowork agent-install --agent codex
+          # Real WSL2 (unlike the docker guest-e2e, whose `run:` step has stdin from
+          # /dev/null) passes an open stdin to wsl.exe, so an installer that reads stdin
+          # blocks forever. Redirect from NUL via cmd (`< nul`; pwsh has no `<`) for an
+          # immediate EOF, bound each guest step with a Linux-side `timeout` so a stall
+          # fails fast (exit 124) with the streamed log instead of hitting the job cap,
+          # and set DEBIAN_FRONTEND so apt cannot stop on an interactive prompt.
+          cmd /c "wsl -d Cowork -u cowork -- env DEBIAN_FRONTEND=noninteractive timeout 900 /usr/local/bin/cowork bootstrap < nul"
+          if ($LASTEXITCODE -ne 0) { throw "bootstrap failed (exit $LASTEXITCODE; 124 = timed out)" }
+          cmd /c "wsl -d Cowork -u cowork -- env DEBIAN_FRONTEND=noninteractive timeout 600 /usr/local/bin/cowork agent-install --agent codex < nul"
+          if ($LASTEXITCODE -ne 0) { throw "agent-install failed (exit $LASTEXITCODE; 124 = timed out)" }
       - name: Assert the happy path inside real WSL (by absolute path)
         shell: pwsh
         run: |

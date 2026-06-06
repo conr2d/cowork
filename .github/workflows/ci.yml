@@ -218,13 +218,25 @@ jobs:
       - name: Diagnose the codex installer hang in real WSL (known-red; tracking the WSL2-only stall)
         shell: pwsh
         run: |
-          # codex's installer finishes in ~4s in the docker guest-e2e but hangs in real
-          # WSL2 (the guest's 300s hang-guard now fires cleanly as agent.installer_hang
-          # since 225351c). The guest CLI discards installer output on timeout, so trace
-          # the RAW installer here with `sh -x` (codex's runner) under a short timeout to
-          # capture the last command before the stall. Expected to fail until root-caused.
-          cmd /c "wsl -d Cowork -u cowork -- env CODEX_HOME=/home/cowork/.cowork/creds/codex bash -c 'mkdir -p /home/cowork/.cowork/creds/codex; curl -fsSL https://chatgpt.com/codex/install.sh -o /tmp/codex-install.sh && timeout 150 sh -x /tmp/codex-install.sh 2>&1' < nul"
-          if ($LASTEXITCODE -ne 0) { throw "codex installer ended nonzero (exit $LASTEXITCODE; 124 = timed out) — see the sh -x trace above for the hang point" }
+          # codex's installer finishes in ~4s in the docker guest-e2e but hangs ~300s in
+          # real WSL2 via the guest's curl|sh path (surfaced cleanly as
+          # agent.installer_hang since 225351c). The guest CLI discards installer output
+          # on timeout, so trace the RAW installer here with `sh -x` (codex's runner)
+          # under a short timeout to capture the last command before the stall. The probe
+          # is written to a FILE (not an inline command) so the nested quoting and the
+          # `2>&1` survive the pwsh->cmd->wsl->bash layers; `< nul` gives the installer an
+          # EOF stdin. Expected red until root-caused.
+          $probe = @(
+            'set -x',
+            'exec 2>&1',
+            'export CODEX_HOME="$HOME/.cowork/creds/codex"',
+            'mkdir -p "$CODEX_HOME"',
+            'curl -fsSL https://chatgpt.com/codex/install.sh -o /tmp/codex-install.sh',
+            'timeout 150 sh -x /tmp/codex-install.sh'
+          ) -join "`n"
+          [System.IO.File]::WriteAllText('\\wsl.localhost\Cowork\tmp\codex-probe.sh', $probe + "`n")
+          cmd /c "wsl -d Cowork -u cowork -- bash /tmp/codex-probe.sh < nul"
+          if ($LASTEXITCODE -ne 0) { throw "codex installer probe ended nonzero (exit $LASTEXITCODE; 124 = timed out) — see the trace above for the hang point" }
       - name: Unregister the distro (validate the Remove Cowork teardown)
         if: always()
         shell: pwsh

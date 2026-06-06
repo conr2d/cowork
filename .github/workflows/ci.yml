@@ -194,7 +194,7 @@ jobs:
           Copy-Item guest\cowork \\wsl.localhost\Cowork\usr\local\bin\cowork -Force
           wsl -d Cowork -u root -- chmod 0755 /usr/local/bin/cowork
           wsl -d Cowork -u root -- /usr/local/bin/cowork --version
-      - name: Create a firstboot-like user, then bootstrap + install codex (no login)
+      - name: Create a firstboot-like user, then run the real bootstrap (no login)
         shell: pwsh
         run: |
           wsl -d Cowork -u root -- useradd -m -s /bin/bash cowork
@@ -202,17 +202,29 @@ jobs:
           # Real WSL2 (unlike the docker guest-e2e, whose `run:` step has stdin from
           # /dev/null) passes an open stdin to wsl.exe, so an installer that reads stdin
           # blocks forever. Redirect from NUL via cmd (`< nul`; pwsh has no `<`) for an
-          # immediate EOF, bound each guest step with a Linux-side `timeout` so a stall
-          # fails fast (exit 124) with the streamed log instead of hitting the job cap,
-          # and set DEBIAN_FRONTEND so apt cannot stop on an interactive prompt.
+          # immediate EOF, bound the guest step with a Linux-side `timeout` so a stall
+          # fails fast instead of hitting the job cap, and set DEBIAN_FRONTEND so apt
+          # cannot stop on an interactive prompt.
           cmd /c "wsl -d Cowork -u cowork -- env DEBIAN_FRONTEND=noninteractive timeout 900 /usr/local/bin/cowork bootstrap < nul"
           if ($LASTEXITCODE -ne 0) { throw "bootstrap failed (exit $LASTEXITCODE; 124 = timed out)" }
-          cmd /c "wsl -d Cowork -u cowork -- env DEBIAN_FRONTEND=noninteractive timeout 600 /usr/local/bin/cowork agent-install --agent codex < nul"
-          if ($LASTEXITCODE -ne 0) { throw "agent-install failed (exit $LASTEXITCODE; 124 = timed out)" }
-      - name: Assert the happy path inside real WSL (by absolute path)
+      - name: Assert the substrate + toolchain in real WSL (the proven happy path, minus codex)
         shell: pwsh
         run: |
-          wsl -d Cowork -u cowork -- bash -c 'set -euo pipefail; test -d "$HOME/workspaces/default" && test -x /home/linuxbrew/.linuxbrew/bin/brew && test -x "$HOME/.local/bin/mise" && test -x "$HOME/.local/bin/codex" && grep -q CODEX_HOME "$HOME/.bashrc"'
+          # bootstrap (brew/mise/locales/workspace) is verified here on the real WSL2
+          # kernel; codex install is tracked separately below. Absolute paths: a
+          # non-interactive shell returns early from ~/.bashrc, so brew/mise are not on
+          # PATH — that is expected.
+          wsl -d Cowork -u cowork -- bash -c 'set -euo pipefail; test -d "$HOME/workspaces/default" && test -x /home/linuxbrew/.linuxbrew/bin/brew && test -x "$HOME/.local/bin/mise"'
+      - name: Diagnose the codex installer hang in real WSL (known-red; tracking the WSL2-only stall)
+        shell: pwsh
+        run: |
+          # codex's installer finishes in ~4s in the docker guest-e2e but hangs in real
+          # WSL2 (the guest's 300s hang-guard now fires cleanly as agent.installer_hang
+          # since 225351c). The guest CLI discards installer output on timeout, so trace
+          # the RAW installer here with `sh -x` (codex's runner) under a short timeout to
+          # capture the last command before the stall. Expected to fail until root-caused.
+          cmd /c "wsl -d Cowork -u cowork -- env CODEX_HOME=/home/cowork/.cowork/creds/codex bash -c 'mkdir -p /home/cowork/.cowork/creds/codex; curl -fsSL https://chatgpt.com/codex/install.sh -o /tmp/codex-install.sh && timeout 150 sh -x /tmp/codex-install.sh 2>&1' < nul"
+          if ($LASTEXITCODE -ne 0) { throw "codex installer ended nonzero (exit $LASTEXITCODE; 124 = timed out) — see the sh -x trace above for the hang point" }
       - name: Unregister the distro (validate the Remove Cowork teardown)
         if: always()
         shell: pwsh

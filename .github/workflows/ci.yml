@@ -211,32 +211,17 @@ jobs:
         shell: pwsh
         run: |
           # bootstrap (brew/mise/locales/workspace) is verified here on the real WSL2
-          # kernel; codex install is tracked separately below. Absolute paths: a
-          # non-interactive shell returns early from ~/.bashrc, so brew/mise are not on
-          # PATH — that is expected.
+          # kernel. Absolute paths: a non-interactive shell returns early from ~/.bashrc,
+          # so brew/mise are not on PATH — that is expected.
           wsl -d Cowork -u cowork -- bash -c 'set -euo pipefail; test -d "$HOME/workspaces/default" && test -x /home/linuxbrew/.linuxbrew/bin/brew && test -x "$HOME/.local/bin/mise"'
-      - name: Diagnose the codex installer hang in real WSL (known-red; tracking the WSL2-only stall)
-        shell: pwsh
-        run: |
-          # codex's installer finishes in ~4s in the docker guest-e2e but hangs ~300s in
-          # real WSL2 via the guest's curl|sh path (surfaced cleanly as
-          # agent.installer_hang since 225351c). The guest CLI discards installer output
-          # on timeout, so trace the RAW installer here with `sh -x` (codex's runner)
-          # under a short timeout to capture the last command before the stall. The probe
-          # is written to a FILE (not an inline command) so the nested quoting and the
-          # `2>&1` survive the pwsh->cmd->wsl->bash layers; `< nul` gives the installer an
-          # EOF stdin. Expected red until root-caused.
-          $probe = @(
-            'set -x',
-            'exec 2>&1',
-            'export CODEX_HOME="$HOME/.cowork/creds/codex"',
-            'mkdir -p "$CODEX_HOME"',
-            'curl -fsSL https://chatgpt.com/codex/install.sh -o /tmp/codex-install.sh',
-            'timeout 150 sh -x /tmp/codex-install.sh'
-          ) -join "`n"
-          [System.IO.File]::WriteAllText('\\wsl.localhost\Cowork\tmp\codex-probe.sh', $probe + "`n")
-          cmd /c "wsl -d Cowork -u cowork -- bash /tmp/codex-probe.sh < nul"
-          if ($LASTEXITCODE -ne 0) { throw "codex installer probe ended nonzero (exit $LASTEXITCODE; 124 = timed out) — see the trace above for the hang point" }
+      # NOTE: codex agent install is deliberately NOT exercised here. Its installer
+      # resolves versions and asset URLs via api.github.com, which is unauthenticated
+      # (60 req/h/IP) and rate-limited to HTTP 403 on the shared GitHub-Actions runner
+      # egress IP — and the installer uses a plain `curl` with no token support, so the
+      # 403 cannot be avoided in CI. This is a CI-infrastructure limit, not a product or
+      # WSL2 issue (a real single-user IP installs fine; a shared corporate NAT is a real
+      # edge tracked for WP7). codex install is validated at the Hyper-V full gate
+      # (WP10), on a real user IP. See memory: cowork-wp7-installer-deadlock.
       - name: Unregister the distro (validate the Remove Cowork teardown)
         if: always()
         shell: pwsh

@@ -13,7 +13,7 @@ use cowork_errors::{Code, Envelope, Stage};
 
 use crate::protocol::HostEvent;
 
-use super::DISTRO_NAME;
+use super::{DISTRO_NAME, WSL_USER};
 
 /// Absolute path of the injected guest CLI inside the distro. `/usr/local/bin`
 /// is on every login PATH and exists in a stock Ubuntu rootfs.
@@ -54,6 +54,45 @@ pub fn launch_args(extra: &[String]) -> Vec<String> {
     ];
     v.extend_from_slice(extra);
     v
+}
+
+/// The shell script (run as root inside the distro) that creates the non-root
+/// firstboot user, grants it passwordless sudo (bootstrap needs sudo for apt and
+/// locale-gen), and sets it as the distro's default user via `/etc/wsl.conf`.
+/// Idempotent: the user is only created if absent; the sudoers and wsl.conf files
+/// are rewritten each time. The wsl.conf default user takes effect after a
+/// `wsl --terminate` (see [`terminate_args`]).
+fn firstboot_script() -> String {
+    format!(
+        "set -e\n\
+         id -u {user} >/dev/null 2>&1 || useradd -m -s /bin/bash {user}\n\
+         echo '{user} ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/{user}\n\
+         chmod 0440 /etc/sudoers.d/{user}\n\
+         printf '[user]\\ndefault={user}\\n' > /etc/wsl.conf",
+        user = WSL_USER
+    )
+}
+
+/// `wsl -d Cowork -u root -- bash -c "<firstboot_script>"` — create the firstboot
+/// user and set it as the distro default. Runs as root because the import default
+/// user is root and only root can useradd / write /etc.
+pub fn firstboot_setup_args() -> Vec<String> {
+    vec![
+        "-d".to_string(),
+        DISTRO_NAME.to_string(),
+        "-u".to_string(),
+        "root".to_string(),
+        "--".to_string(),
+        "bash".to_string(),
+        "-c".to_string(),
+        firstboot_script(),
+    ]
+}
+
+/// `wsl --terminate Cowork` — stop the distro so the new /etc/wsl.conf default
+/// user is read on the next launch.
+pub fn terminate_args() -> Vec<String> {
+    vec!["--terminate".to_string(), DISTRO_NAME.to_string()]
 }
 
 /// `guest.cli_inject_failed` (Internal) — copying the binary in or setting its
@@ -197,6 +236,33 @@ mod tests {
                 "+x".to_string(),
                 "/usr/local/bin/cowork".to_string(),
             ]
+        );
+    }
+
+    #[test]
+    fn firstboot_setup_args_create_user_sudo_and_default_via_wsl_conf() {
+        let a = firstboot_setup_args();
+        assert_eq!(a[0], "-d");
+        assert_eq!(a[1], DISTRO_NAME);
+        assert_eq!(a[2], "-u");
+        assert_eq!(a[3], "root");
+        assert_eq!(a[4], "--");
+        assert_eq!(a[5], "bash");
+        assert_eq!(a[6], "-c");
+        let script = &a[7];
+        assert!(script.contains("useradd -m -s /bin/bash cowork"));
+        assert!(script.contains("id -u cowork")); // idempotent guard
+        assert!(script.contains("cowork ALL=(ALL) NOPASSWD:ALL"));
+        assert!(script.contains("/etc/sudoers.d/cowork"));
+        assert!(script.contains("default=cowork"));
+        assert!(script.contains("/etc/wsl.conf"));
+    }
+
+    #[test]
+    fn terminate_args_target_the_cowork_distro() {
+        assert_eq!(
+            terminate_args(),
+            vec!["--terminate".to_string(), "Cowork".to_string()]
         );
     }
 

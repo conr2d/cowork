@@ -14,8 +14,9 @@ use crate::protocol::StreamParser;
 
 use super::inject::{
     RunOutcome, chmod_args, classify_run, cli_inject_failed_envelope, cli_launch_failed_envelope,
-    launch_args, unc_inject_path,
+    firstboot_setup_args, launch_args, terminate_args, unc_inject_path,
 };
+use super::user_create_failed_envelope;
 
 /// Inject the host-side guest binary at `src_binary` into the `Cowork` distro:
 /// copy it to `\\wsl.localhost\Cowork\usr\local\bin\cowork`, then `chmod +x` it
@@ -34,6 +35,29 @@ pub fn inject_guest(src_binary: &str) -> Result<(), Envelope> {
             out.status.code().unwrap_or(-1)
         ))),
         Err(e) => Err(cli_inject_failed_envelope(&format!("launch chmod: {e}"))),
+    }
+}
+
+/// Create the non-root firstboot user, set it as the distro default, and
+/// `wsl --terminate` so the new default applies. Called after `inject_guest`, before
+/// bootstrap. Without this, the import default user (root) runs bootstrap and
+/// Homebrew aborts ("Don't run this as root!"). Idempotent on a re-provisioned distro.
+pub fn setup_firstboot_user() -> Result<(), Envelope> {
+    run_root_wsl(&firstboot_setup_args(), "firstboot setup")?;
+    run_root_wsl(&terminate_args(), "terminate")?;
+    Ok(())
+}
+
+/// Run `wsl.exe <args>` to completion, mapping any failure to
+/// `distro.user_create_failed`. `what` labels the step in the (redacted) cause.
+fn run_root_wsl(args: &[String], what: &str) -> Result<(), Envelope> {
+    match Command::new("wsl.exe").args(args).output() {
+        Ok(out) if out.status.success() => Ok(()),
+        Ok(out) => Err(user_create_failed_envelope(&format!(
+            "{what} exited {}",
+            out.status.code().unwrap_or(-1)
+        ))),
+        Err(e) => Err(user_create_failed_envelope(&format!("launch {what}: {e}"))),
     }
 }
 

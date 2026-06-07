@@ -21,9 +21,12 @@ pub use command::{
     user_create_failed_envelope, verify_checksum,
 };
 #[cfg(any(windows, test))]
-pub use inject::{GUEST_BIN_PATH, RunOutcome, classify_run, launch_args, unc_inject_path};
+pub use inject::{
+    GUEST_BIN_PATH, RunOutcome, classify_run, firstboot_setup_args, launch_args, terminate_args,
+    unc_inject_path,
+};
 #[cfg(windows)]
-pub use windows_inject::{inject_guest, run_guest};
+pub use windows_inject::{inject_guest, run_guest, setup_firstboot_user};
 #[cfg(windows)]
 pub use windows_provision::WindowsProvisionOps;
 
@@ -31,6 +34,10 @@ use cowork_errors::{Code, Envelope, Stage};
 
 /// The dedicated distro name. Never collides with a user's `Ubuntu`.
 pub const DISTRO_NAME: &str = "Cowork";
+/// The non-root firstboot user created inside the distro. Homebrew refuses to run
+/// as root, so bootstrap, agent install, and the terminal all run as this user
+/// (set as the distro default via /etc/wsl.conf during provisioning).
+pub const WSL_USER: &str = "cowork";
 /// The Store image used only for the fallback `--install --name` path.
 pub const FALLBACK_STORE_DISTRO: &str = "Ubuntu-24.04";
 /// Pinned Ubuntu 24.04 WSL rootfs, re-hosted byte-identically on the Cowork

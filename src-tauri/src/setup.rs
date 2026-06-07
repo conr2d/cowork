@@ -13,7 +13,7 @@ use cowork_errors::{Code, Envelope, Stage};
 use cowork_host::preflight::{PreflightReport, WindowsProbe, run_preflight};
 use cowork_host::provision::{
     ProvisionOutcome, RunOutcome, WindowsProvisionOps, inject_guest, provision, remove_cowork,
-    run_guest,
+    run_guest, setup_firstboot_user,
 };
 use cowork_host::wsl::{
     ResumeStage, ResumeState, WindowsWslOps, WslEnableOutcome, arm_resume, clear_resume_state,
@@ -187,6 +187,7 @@ pub async fn provision_run() -> Result<ProvisionDto, Envelope> {
         };
         let src = resolve_guest_binary()?;
         inject_guest(&src)?;
+        setup_firstboot_user()?;
         Ok(dto)
     })
     .await

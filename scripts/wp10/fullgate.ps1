@@ -2,40 +2,19 @@
 #Requires -Modules Hyper-V
 <#
 .SYNOPSIS
-  WP10 full-gate harness for Cowork v0.1 - automates the repeatable Hyper-V
-  clean-room scaffolding around the parts that must stay manual.
+Automates the repeatable Hyper-V host scaffolding for the Cowork WP10 full gate.
 
 .DESCRIPTION
-  AUTOMATED (host PowerShell + PowerShell Direct into the guest):
-    - VM creation: nested virtualization, static memory, sized disk, ISO boot
-    - baseline + ready checkpoints, and instant revert between matrix runs
-    - copying the Cowork installer into the guest (Copy-VMFile)
-    - inducing failure conditions: virtualization off, low disk, network drop,
-      a pre-existing Ubuntu distro
-    - post-run verification inside the guest: Cowork distro present, a
-      pre-existing Ubuntu left present, ~/workspaces/default, agent binaries
+AUTOMATED: This harness automates VM creation with nested virtualization, baseline and ready
+checkpoints, checkpoint revert, installer copy into the guest, induced failure
+conditions, and post-run guest verification.
 
-  MANUAL by nature (the harness PAUSES for these):
-    - installing Windows 11 in the guest (one-time; automate with unattend.xml
-      if desired)
-    - clicking through the Cowork.exe wizard (it is a GUI, not a CLI)
-    - the agent OAuth browser login
-
-  Typical flow:
-    1) .\fullgate.ps1 -Action create-vm -IsoPath C:\iso\Win11.iso
-       (install Windows 11 in the guest, finish OOBE, enable PS remoting if asked)
-    2) .\fullgate.ps1 -Action baseline-checkpoint
-    3) .\fullgate.ps1 -Action prepare -CoworkSetup C:\path\to\Cowork-setup.exe
-    4) per matrix row:
-         .\fullgate.ps1 -Action revert
-         .\fullgate.ps1 -Action induce -Failure low-disk        # optional
-         <run the Cowork.exe wizard + OAuth manually in the guest>
-         .\fullgate.ps1 -Action verify-guest
+MANUAL: The Windows 11 installation, the Cowork GUI wizard, and agent OAuth stay manual.
+The harness pauses for those manual parts and prints the next action to run.
 
 .NOTES
-  Run elevated on the Hyper-V HOST. The guest must have the "Guest Service
-  Interface" integration service (enabled by create-vm) for file copy, and
-  PowerShell Direct uses a guest local-admin credential (prompted once).
+Run this script elevated on the Hyper-V host. Guest-side commands use
+PowerShell Direct through Invoke-Command -VMName, and file copy uses Copy-VMFile.
 #>
 [CmdletBinding()]
 param(
@@ -55,168 +34,205 @@ param(
     [string]$Failure,
 
     [string]$SwitchName = 'Default Switch',
-    [int]$TargetFreeGB = 14,          # induce low-disk: leave this much free (< 16 GiB hard bar)
-    [string]$GuestDest = 'C:\Cowork'  # where the installer is copied inside the guest
+    [int]$TargetFreeGB = 14,
+    [string]$GuestDest = 'C:\Cowork'
 )
 
 $ErrorActionPreference = 'Stop'
 $BaselineSnap = 'clean-wsl-never-enabled'
-
-# --- guest credential (PowerShell Direct), prompted once -------------------
 $script:GuestCred = $null
+
 function Get-GuestCred {
     if (-not $script:GuestCred) {
-        $script:GuestCred = Get-Credential -Message "Guest ($VmName) local Windows account (for PowerShell Direct)"
+        $script:GuestCred = Get-Credential -Message 'the guest local Windows account for PowerShell Direct.'
     }
+
     return $script:GuestCred
 }
 
 function Invoke-Guest {
-    param([Parameter(Mandatory)][scriptblock]$Script, [object[]]$ArgList)
+    param(
+        [Parameter(Mandatory)]
+        [scriptblock]$Script,
+
+        [object[]]$ArgList = @()
+    )
+
     Invoke-Command -VMName $VmName -Credential (Get-GuestCred) -ScriptBlock $Script -ArgumentList $ArgList
 }
 
 function Assert-VmExists {
     if (-not (Get-VM -Name $VmName -ErrorAction SilentlyContinue)) {
-        throw "VM '$VmName' does not exist. Run -Action create-vm first."
+        throw "VM '$VmName' does not exist."
     }
 }
 
-# --- actions ---------------------------------------------------------------
 switch ($Action) {
-
     'create-vm' {
-        if (-not $IsoPath) { throw "-IsoPath <Win11.iso> is required for create-vm." }
-        if (Get-VM -Name $VmName -ErrorAction SilentlyContinue) { throw "VM '$VmName' already exists." }
+        if (-not $IsoPath) {
+            throw "-IsoPath is required for create-vm."
+        }
 
-        $vhd = Join-Path (Split-Path (Get-VMHost).VirtualHardDiskPath) "$VmName.vhdx"
-        Write-Host "Creating VM '$VmName' (Gen2, ${MemoryGB}GB static RAM, $Cpu vCPU, ${VhdSizeGB}GB disk)..."
-        New-VM -Name $VmName -Generation 2 -MemoryStartupBytes ($MemoryGB * 1GB) `
-            -NewVHDPath $vhd -NewVHDSizeBytes ($VhdSizeGB * 1GB) -SwitchName $SwitchName | Out-Null
+        if (Get-VM -Name $VmName -ErrorAction SilentlyContinue) {
+            throw "VM '$VmName' already exists."
+        }
 
-        # Nested virtualization (WSL2 = a VM inside the guest) needs static memory
-        # and the exposed virtualization extensions; both require the VM powered off.
+        $vhd = Join-Path (Get-VMHost).VirtualHardDiskPath "$VmName.vhdx"
+
+        New-VM -Name $VmName -Generation 2 -MemoryStartupBytes ($MemoryGB * 1GB) -NewVHDPath $vhd -NewVHDSizeBytes ($VhdSizeGB * 1GB) -SwitchName $SwitchName
         Set-VM -Name $VmName -StaticMemory -AutomaticCheckpointsEnabled $false
         Set-VMProcessor -VMName $VmName -Count $Cpu -ExposeVirtualizationExtensions $true
-        Set-VMMemory  -VMName $VmName -StartupBytes ($MemoryGB * 1GB)
+        Set-VMMemory -VMName $VmName -StartupBytes ($MemoryGB * 1GB)
 
-        # Boot from the install ISO; enable file copy into the guest.
         $dvd = Add-VMDvdDrive -VMName $VmName -Path $IsoPath -Passthru
         Set-VMFirmware -VMName $VmName -FirstBootDevice $dvd
         Enable-VMIntegrationService -VMName $VmName -Name 'Guest Service Interface'
 
         Start-VM -Name $VmName
-        Write-Host "VM started. Now install Windows 11 in the guest and finish OOBE." -ForegroundColor Yellow
-        Write-Host "Then verify WSL is ABSENT, and run: .\fullgate.ps1 -Action baseline-checkpoint" -ForegroundColor Yellow
+        Write-Host "Install Windows 11, finish OOBE, then run: .\fullgate.ps1 -Action baseline-checkpoint" -ForegroundColor Yellow
     }
 
     'baseline-checkpoint' {
         Assert-VmExists
-        Write-Host "Verifying the guest baseline (WSL must be ABSENT, not just disabled)..."
-        Invoke-Guest {
-            $wsl = (Get-Command wsl.exe -ErrorAction SilentlyContinue)
-            $vmp = (Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform).State
-            $lxs = (Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux).State
-            [pscustomobject]@{ WslExe = [bool]$wsl; VirtualMachinePlatform = $vmp; WSLFeature = $lxs }
+
+        Invoke-Guest -Script {
+            $wsl = Get-Command wsl.exe -ErrorAction SilentlyContinue
+            $vmp = Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform
+            $wslFeature = Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux
+
+            [pscustomobject]@{
+                WslExe = [bool]$wsl
+                VirtualMachinePlatform = $vmp.State
+                MicrosoftWindowsSubsystemLinux = $wslFeature.State
+            }
         } | Format-List
-        Write-Host "If VirtualMachinePlatform/WSLFeature are 'Disabled' and no distro is registered, this is a clean baseline." -ForegroundColor Yellow
+
+        Write-Host "Clean baseline means both optional features are Disabled and no distro is registered." -ForegroundColor Yellow
         Checkpoint-VM -Name $VmName -SnapshotName $BaselineSnap
-        Write-Host "Checkpoint '$BaselineSnap' created." -ForegroundColor Green
     }
 
     'prepare' {
         Assert-VmExists
-        if (-not $CoworkSetup) { throw "-CoworkSetup <path-to-installer.exe> is required for prepare." }
-        if (-not (Test-Path $CoworkSetup)) { throw "Installer not found: $CoworkSetup" }
 
-        Write-Host "Copying '$CoworkSetup' into the guest at '$GuestDest'..."
-        $dest = Join-Path $GuestDest (Split-Path $CoworkSetup -Leaf)
-        Copy-VMFile -VMName $VmName -SourcePath $CoworkSetup -DestinationPath $dest `
-            -FileSource Host -CreateFullPath -Force
-        Write-Host "Copied to guest: $dest" -ForegroundColor Green
-        Write-Host "Reminder: sign the guest browser OUT of agent accounts so OAuth is a real login." -ForegroundColor Yellow
+        if (-not $CoworkSetup) {
+            throw "-CoworkSetup is required for prepare."
+        }
+
+        if (-not (Test-Path $CoworkSetup)) {
+            throw "Cowork installer does not exist: $CoworkSetup"
+        }
+
+        $destination = Join-Path $GuestDest (Split-Path $CoworkSetup -Leaf)
+        Copy-VMFile -VMName $VmName -SourcePath $CoworkSetup -DestinationPath $destination -FileSource Host -CreateFullPath -Force
+        Write-Host "Installer copied to $destination."
+        Write-Host "Sign the guest browser OUT of the agent accounts before running the GUI wizard." -ForegroundColor Yellow
         Checkpoint-VM -Name $VmName -SnapshotName $Snapshot
-        Write-Host "Checkpoint '$Snapshot' created (start each matrix run by reverting to it)." -ForegroundColor Green
     }
 
     'revert' {
         Assert-VmExists
-        Write-Host "Reverting '$VmName' to checkpoint '$Snapshot'..."
+
         Restore-VMCheckpoint -VMName $VmName -Name $Snapshot -Confirm:$false
         Start-VM -Name $VmName -ErrorAction SilentlyContinue
-        Write-Host "Reverted and started. Run the wizard manually now." -ForegroundColor Green
     }
 
     'induce' {
         Assert-VmExists
-        if (-not $Failure) { throw "-Failure <virt-off|virt-on|low-disk|restore-disk|net-drop|net-restore|existing-ubuntu> is required." }
+
+        if (-not $Failure) {
+            throw "-Failure is required for induce."
+        }
+
         switch ($Failure) {
             'virt-off' {
-                # Expected: preflight.virtualization_disabled / virtualization_unsupported. VM must be Off.
                 Stop-VM -Name $VmName -Force -ErrorAction SilentlyContinue
                 Set-VMProcessor -VMName $VmName -ExposeVirtualizationExtensions $false
-                Write-Host "Nested virtualization DISABLED. Start the VM and run the wizard." -ForegroundColor Green
+                Write-Host "Expected wizard result: preflight.virtualization_disabled or preflight.virtualization_unsupported." -ForegroundColor Yellow
             }
+
             'virt-on' {
                 Stop-VM -Name $VmName -Force -ErrorAction SilentlyContinue
                 Set-VMProcessor -VMName $VmName -ExposeVirtualizationExtensions $true
-                Write-Host "Nested virtualization RE-ENABLED." -ForegroundColor Green
             }
+
             'low-disk' {
-                # Expected: preflight.insufficient_disk. Fill C: so free < 16 GiB.
-                Invoke-Guest {
-                    param($targetFreeGB)
+                Invoke-Guest -Script {
+                    param([int]$TargetFreeGB)
+
                     $free = (Get-PSDrive C).Free
-                    $target = $targetFreeGB * 1GB
-                    if ($free -le $target) { "Free already <= ${targetFreeGB}GB ($([math]::Round($free/1GB,1)) GB)"; return }
-                    $fill = $free - $target
-                    & fsutil file createnew C:\cowork-fill.bin $fill | Out-Null
-                    "Created C:\cowork-fill.bin = $([math]::Round($fill/1GB,1)) GB; free now ~${targetFreeGB}GB"
-                } -ArgList $TargetFreeGB
+                    $target = [int64]$TargetFreeGB * 1GB
+
+                    if ($free -le $target) {
+                        Write-Host "C: already has $([math]::Round($free / 1GB, 2)) GB free, at or below target $TargetFreeGB GB."
+                        return
+                    }
+
+                    $bytes = [int64]($free - $target)
+                    fsutil file createnew C:\cowork-fill.bin $bytes
+                } -ArgList @($TargetFreeGB)
+
+                Write-Host "Expected wizard result: preflight.insufficient_disk." -ForegroundColor Yellow
             }
+
             'restore-disk' {
-                Invoke-Guest { Remove-Item C:\cowork-fill.bin -Force -ErrorAction SilentlyContinue; "removed fill file" }
+                Invoke-Guest -Script {
+                    Remove-Item C:\cowork-fill.bin -Force -ErrorAction SilentlyContinue
+                }
             }
+
             'net-drop' {
-                # Expected: common.network_failed (Transient) during install.
                 Get-VMNetworkAdapter -VMName $VmName | Disconnect-VMNetworkAdapter
-                Write-Host "Guest network DISCONNECTED." -ForegroundColor Green
+                Write-Host "Expected wizard result: common.network_failed Transient." -ForegroundColor Yellow
             }
+
             'net-restore' {
                 Get-VMNetworkAdapter -VMName $VmName | Connect-VMNetworkAdapter -SwitchName $SwitchName
-                Write-Host "Guest network RECONNECTED to '$SwitchName'." -ForegroundColor Green
             }
+
             'existing-ubuntu' {
-                # Isolation check: a stock Ubuntu must survive a Cowork install untouched.
-                # Requires WSL already enabled in the guest (run after the WSL-enable step,
-                # or on a checkpoint where WSL is on).
-                Invoke-Guest { & wsl.exe --install -d Ubuntu --no-launch 2>&1; "requested 'Ubuntu' install (verify with: wsl -l -v)" }
+                Invoke-Guest -Script {
+                    # Requires WSL already enabled in the guest; used for the isolation check that a pre-existing Ubuntu survives a Cowork install.
+                    wsl.exe --install -d Ubuntu --no-launch
+                }
             }
         }
     }
 
     'verify-guest' {
         Assert-VmExists
-        Write-Host "Verifying guest state after a wizard run..."
-        Invoke-Guest {
-            "=== wsl -l -v (Cowork present? a pre-existing Ubuntu still present?) ==="
-            & wsl.exe -l -v
-            "=== inside the Cowork distro ==="
-            & wsl.exe -d Cowork -- bash -lc 'set +e
-              echo "workspace:"; test -d "$HOME/workspaces/default" && echo "  OK ~/workspaces/default" || echo "  MISSING"
-              echo "toolchain:"; for b in /home/linuxbrew/.linuxbrew/bin/brew "$HOME/.local/bin/mise"; do [ -x "$b" ] && echo "  OK $b" || echo "  MISSING $b"; done
-              echo "agents:"; for b in claude codex agy; do p="$HOME/.local/bin/$b"; [ -x "$p" ] && echo "  OK $p" || echo "  (absent) $p"; done
-              echo "creds:"; ls -la "$HOME/.cowork/creds" 2>/dev/null || echo "  (none yet)"'
+
+        Invoke-Guest -Script {
+            Write-Host 'wsl.exe -l -v'
+            wsl.exe -l -v
+
+            Write-Host 'Cowork distro checks'
+            wsl.exe -d Cowork -- bash -lc 'set +e
+echo "workspace"
+test -d "$HOME/workspaces/default" && echo "OK $HOME/workspaces/default" || echo "MISSING $HOME/workspaces/default"
+echo "toolchain"
+test -x "/home/linuxbrew/.linuxbrew/bin/brew" && echo "OK /home/linuxbrew/.linuxbrew/bin/brew" || echo "MISSING /home/linuxbrew/.linuxbrew/bin/brew"
+test -x "$HOME/.local/bin/mise" && echo "OK $HOME/.local/bin/mise" || echo "MISSING $HOME/.local/bin/mise"
+echo "agents"
+for agent in claude codex agy; do
+  test -x "$HOME/.local/bin/$agent" && echo "OK $HOME/.local/bin/$agent" || echo "MISSING $HOME/.local/bin/$agent"
+done
+echo "creds"
+ls "$HOME/.cowork/creds"'
         }
-        Write-Host "Review the output above against the runbook's pass criteria (docs/wp10-full-gate.md)." -ForegroundColor Yellow
+
+        Write-Host "Compare the guest output against docs/wp10-full-gate.md." -ForegroundColor Yellow
     }
 
     'status' {
         $vm = Get-VM -Name $VmName -ErrorAction SilentlyContinue
-        if (-not $vm) { Write-Host "VM '$VmName' does not exist."; break }
+
+        if (-not $vm) {
+            Write-Host "VM '$VmName' does not exist."
+            break
+        }
+
         $vm | Format-List Name, State, ProcessorCount, MemoryAssigned
-        Write-Host "Nested virt:" (Get-VMProcessor -VMName $VmName).ExposeVirtualizationExtensions
-        Write-Host "Checkpoints:"
+        (Get-VMProcessor -VMName $VmName).ExposeVirtualizationExtensions
         Get-VMCheckpoint -VMName $VmName | Select-Object Name, CreationTime | Format-Table -AutoSize
     }
 }

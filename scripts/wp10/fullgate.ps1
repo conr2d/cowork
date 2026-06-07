@@ -88,6 +88,12 @@ switch ($Action) {
         Set-VMFirmware -VMName $VmName -FirstBootDevice $dvd
         Enable-VMIntegrationService -VMName $VmName -Name 'Guest Service Interface'
 
+        # Windows 11 requires TPM 2.0 and Secure Boot. A virtual TPM needs a key
+        # protector first; a local key protector suits a standalone (non-HGS) host.
+        Set-VMKeyProtector -VMName $VmName -NewLocalKeyProtector
+        Enable-VMTPM -VMName $VmName
+        Set-VMFirmware -VMName $VmName -EnableSecureBoot On -SecureBootTemplate MicrosoftWindows
+
         Start-VM -Name $VmName
         Write-Host "Install Windows 11, finish OOBE, then run: .\fullgate.ps1 -Action baseline-checkpoint" -ForegroundColor Yellow
     }

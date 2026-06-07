@@ -30,6 +30,8 @@
 		</div>
 	</div>
 	<div class="min-h-0 flex-1 bg-neutral-900 p-2">
-		<Terminal distro="Cowork" workspace="~/cowork" {locale} detectLinks />
+		<!-- workspace MUST match the guest bootstrap's workspace_path (~/workspaces/default);
+		     a mismatch makes `wsl --cd` fail with chdir errno 2 and a scary banner. -->
+		<Terminal distro="Cowork" workspace="~/workspaces/default" {locale} detectLinks />
 	</div>
 </main>

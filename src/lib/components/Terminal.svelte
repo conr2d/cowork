@@ -12,12 +12,20 @@
 		distro = 'Cowork',
 		workspace = '~',
 		locale = 'en',
-		detectLinks = false
-	}: { distro?: string; workspace?: string; locale?: string; detectLinks?: boolean } = $props();
+		detectLinks = false,
+		loginAttempts = 0
+	}: {
+		distro?: string;
+		workspace?: string;
+		locale?: string;
+		detectLinks?: boolean;
+		loginAttempts?: number;
+	} = $props();
 
 	let container: HTMLDivElement | undefined = $state();
 	let cleanup: (() => void) | undefined;
 	let detectedUrl = $state<string | null>(null);
+	let termRef = $state<XTerm | undefined>(undefined);
 	let openUrl: ((url: string) => Promise<void>) | undefined;
 
 	async function loadCanvasFallback(term: XTerm): Promise<void> {
@@ -49,6 +57,7 @@
 				allowProposedApi: true,
 				windowsPty: { backend: 'conpty' }
 			});
+			termRef = term;
 
 			const fit = new FitAddon();
 			term.loadAddon(fit);
@@ -83,13 +92,16 @@
 			// (a hardcoded default corrupts a full-screen TUI's first frame).
 			fit.fit();
 
-			const scanner = detectLinks ? createUrlScanner() : null;
+			const scanner = createUrlScanner();
 			const decoder = new TextDecoder();
 			const channel = new Channel<string>();
 			channel.onmessage = (chunk) => {
 				const bytes = base64ToBytes(chunk);
 				term.write(bytes);
-				if (scanner) {
+				// Only scan once a login has been triggered — otherwise the shell's
+				// startup banner (e.g. the Ubuntu MOTD URL) would surface the button
+				// before the user has started signing in.
+				if (detectLinks && loginAttempts > 0) {
 					const url = scanner.push(decoder.decode(bytes, { stream: true }));
 					if (url) detectedUrl = url;
 				}
@@ -103,6 +115,7 @@
 				rows: term.rows,
 				cols: term.cols
 			});
+			term.focus();
 
 			const dataSub = term.onData((data) => {
 				void invoke('pty_write', { data });
@@ -121,6 +134,12 @@
 				term.dispose();
 			};
 		})();
+	});
+
+	// Focus the terminal each time a login is triggered, so the user can type /
+	// paste (e.g. an auth code) without having to click into the terminal first.
+	$effect(() => {
+		if (loginAttempts > 0) termRef?.focus();
 	});
 
 	onDestroy(() => cleanup?.());

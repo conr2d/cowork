@@ -11,6 +11,7 @@
 
 	const locale = getLocale();
 	const choices = $derived(AGENT_CHOICES.filter((choice) => agents.includes(choice.id)));
+	let loginAttempts = $state(0);
 </script>
 
 <main class="flex min-h-screen flex-col bg-neutral-50 text-neutral-900">
@@ -22,7 +23,10 @@
 				<button
 					type="button"
 					class="rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-neutral-50"
-					onclick={() => void ptyWrite(loginInput(choice.id))}
+					onclick={() => {
+						void ptyWrite(loginInput(choice.id));
+						loginAttempts += 1;
+					}}
 				>
 					{m.auth_login({ agent: choice.name })}
 				</button>
@@ -32,6 +36,12 @@
 	<div class="min-h-0 flex-1 bg-neutral-900 p-2">
 		<!-- workspace MUST match the guest bootstrap's workspace_path (~/workspaces/default);
 		     a mismatch makes `wsl --cd` fail with chdir errno 2 and a scary banner. -->
-		<Terminal distro="Cowork" workspace="~/workspaces/default" {locale} detectLinks />
+		<Terminal
+			distro="Cowork"
+			workspace="~/workspaces/default"
+			{locale}
+			detectLinks
+			{loginAttempts}
+		/>
 	</div>
 </main>

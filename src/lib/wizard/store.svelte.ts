@@ -20,6 +20,8 @@ export interface Wizard {
 	readonly error: Envelope | null;
 	readonly progress: string | null;
 	readonly running: boolean;
+	readonly attempt: number;
+	readonly autoRetrying: boolean;
 	readonly rebooting: boolean;
 	readonly done: boolean;
 	toggleAgent(id: AgentId): void;
@@ -38,6 +40,7 @@ export function createWizard(host: HostClient): Wizard {
 	let rebooting = $state(false);
 	let done = $state(false);
 	let attempt = $state(0);
+	let autoRetrying = $state(false);
 
 	const canProceed = $derived(step === 'agents' ? isValidSelection(selectedAgents) : true);
 
@@ -92,6 +95,7 @@ export function createWizard(host: HostClient): Wizard {
 			await execute(def);
 			running = false;
 			attempt = 0;
+			autoRetrying = false;
 			if (!rebooting) advance();
 		} catch (caught) {
 			running = false;
@@ -99,10 +103,13 @@ export function createWizard(host: HostClient): Wizard {
 			error = envelope;
 			attempt += 1;
 			if (shouldAutoRetry(envelope.kind, attempt)) {
+				autoRetrying = true;
 				retryTimer = setTimeout(() => {
 					retryTimer = null;
 					void runActive();
 				}, retryDelayMs(attempt));
+			} else {
+				autoRetrying = false;
 			}
 		}
 	}
@@ -126,6 +133,12 @@ export function createWizard(host: HostClient): Wizard {
 		get running() {
 			return running;
 		},
+		get attempt() {
+			return attempt;
+		},
+		get autoRetrying() {
+			return autoRetrying;
+		},
 		get rebooting() {
 			return rebooting;
 		},
@@ -147,6 +160,7 @@ export function createWizard(host: HostClient): Wizard {
 				clearTimeout(retryTimer);
 				retryTimer = null;
 			}
+			autoRetrying = false;
 			void runActive();
 		},
 		async bootstrap() {

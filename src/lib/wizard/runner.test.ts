@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Envelope } from '$lib/errors/registry';
 import type { PreflightReport } from '$lib/host/types';
-import { RUNNER_STEPS, firstPreflightFailure, stepStatus } from './runner';
+import { RUNNER_STEPS, firstPreflightFailure, formatElapsed, stepStatus } from './runner';
 
 const envelope: Envelope = {
 	code: 'preflight.elevation_unavailable',
@@ -58,5 +58,19 @@ describe('stepStatus', () => {
 		expect(stepStatus('preflight', 'provision')).toBe('done');
 		expect(stepStatus('provision', 'provision')).toBe('active');
 		expect(stepStatus('toolchain', 'provision')).toBe('pending');
+	});
+});
+
+describe('formatElapsed', () => {
+	it('formats seconds as m:ss', () => {
+		expect(formatElapsed(0)).toBe('0:00');
+		expect(formatElapsed(5)).toBe('0:05');
+		expect(formatElapsed(65)).toBe('1:05');
+		expect(formatElapsed(600)).toBe('10:00');
+	});
+
+	it('clamps negative and floors fractional input', () => {
+		expect(formatElapsed(-3)).toBe('0:00');
+		expect(formatElapsed(9.9)).toBe('0:09');
 	});
 });

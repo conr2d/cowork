@@ -1,15 +1,19 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages';
 	import type { Envelope, Kind } from '$lib/errors/registry';
-	import { affordanceFor, DIAGNOSTICS_DIR } from './affordance';
+	import { affordanceFor, AUTO_RETRY_MAX, DIAGNOSTICS_DIR } from './affordance';
 
 	let {
 		error,
 		running,
+		autoRetrying,
+		attempt,
 		onRetry
 	}: {
 		error: Envelope;
 		running: boolean;
+		autoRetrying: boolean;
+		attempt: number;
 		onRetry: () => void;
 	} = $props();
 
@@ -49,7 +53,14 @@
 		</div>
 	{/if}
 
-	{#if affordance.canRetry}
+	{#if autoRetrying}
+		<div class="flex items-center gap-2 text-sm text-neutral-600">
+			<span
+				class="inline-block h-4 w-4 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-900"
+			></span>
+			<span>{m.error_auto_retrying({ attempt, max: AUTO_RETRY_MAX })}</span>
+		</div>
+	{:else if affordance.canRetry}
 		<button
 			type="button"
 			class="self-start rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-neutral-50 disabled:opacity-40"

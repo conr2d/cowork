@@ -16,6 +16,8 @@
 	"agent_antigravity_desc": "Google の Antigravity CLI。",
 	"runner_title": "Coworkをセットアップ中",
 	"runner_reboot_body": "続行するにはPCの再起動が必要です。再起動後、Coworkが自動的に再開します。",
+	"runner_active_hint": "数分かかることがあります。このウィンドウは閉じないでください。",
+	"error_auto_retrying": "自動的に再試行しています…（{attempt}/{max}）",
 	"step_preflight": "PCを確認しています",
 	"step_wsl": "WSLを有効化しています",
 	"step_provision": "Linuxをセットアップしています",

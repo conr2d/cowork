@@ -30,17 +30,40 @@ export function stripAnsi(text: string): string {
 	return text.replace(ANSI, '');
 }
 
-/** The last COMPLETE URL in `buffer` — one followed by at least one more
- * character, so we know it fully arrived — with trailing punctuation trimmed.
- * Returns null when there is none (or the only candidate is still at the very
- * end of the buffer, i.e. possibly still arriving). */
-export function detectLatestUrl(buffer: string): string | null {
+/** Whether a URL looks like an OAuth / sign-in authorization URL, rather than an
+ * incidental link in terminal output (the Ubuntu MOTD, docs links, etc.). Keyed
+ * on standard OAuth 2.0 authorize/device markers, not on a specific agent's
+ * host, so it stays precise while surviving an agent changing its auth domain. */
+export function isLoginUrl(url: string): boolean {
+	const u = url.toLowerCase();
+	return (
+		u.includes('/oauth') ||
+		u.includes('/authorize') ||
+		u.includes('/device') ||
+		u.includes('client_id=') ||
+		u.includes('response_type=') ||
+		u.includes('code_challenge=') ||
+		u.includes('user_code=')
+	);
+}
+
+/** The last COMPLETE URL in `buffer` accepted by `accept` — "complete" meaning it
+ * is followed by at least one more character, so we know it fully arrived — with
+ * trailing punctuation trimmed. Returns null when there is none (or the only
+ * candidate is still at the very end of the buffer, i.e. possibly still arriving).
+ * `accept` defaults to any URL; the scanner passes [`isLoginUrl`] so only a real
+ * sign-in URL is surfaced. */
+export function detectLatestUrl(
+	buffer: string,
+	accept: (url: string) => boolean = () => true
+): string | null {
 	let last: string | null = null;
 	for (const match of buffer.matchAll(URL_RE)) {
 		const idx = match.index ?? 0;
 		const end = idx + match[0].length;
 		if (end >= buffer.length) break; // still arriving; wait for more
-		last = match[0].replace(TRAILING, '');
+		const url = match[0].replace(TRAILING, '');
+		if (accept(url)) last = url;
 	}
 	return last;
 }
@@ -51,16 +74,17 @@ export interface UrlScanner {
 }
 
 /** Stateful scanner over a bounded tail of PTY text; reports each newly-completed
- * URL exactly once (until a different URL completes). The raw tail is kept and
- * stripped whole on every push, so an escape sequence split across two chunks
- * (e.g. ESC in one read, the rest in the next) is still rejoined and removed. */
+ * sign-in URL (per [`isLoginUrl`]) exactly once (until a different one completes).
+ * Incidental links (the MOTD, docs) are ignored. The raw tail is kept and stripped
+ * whole on every push, so an escape sequence split across two chunks (e.g. ESC in
+ * one read, the rest in the next) is still rejoined and removed. */
 export function createUrlScanner(maxTail = 8192): UrlScanner {
 	let raw = '';
 	let lastEmitted: string | null = null;
 	return {
 		push(text: string): string | null {
 			raw = (raw + text).slice(-maxTail);
-			const url = detectLatestUrl(stripAnsi(raw));
+			const url = detectLatestUrl(stripAnsi(raw), isLoginUrl);
 			if (url && url !== lastEmitted) {
 				lastEmitted = url;
 				return url;

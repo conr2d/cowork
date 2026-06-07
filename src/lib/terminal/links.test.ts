@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createUrlScanner, detectLatestUrl, stripAnsi } from './links';
+import { createUrlScanner, detectLatestUrl, isLoginUrl, stripAnsi } from './links';
 
 // ESC built at runtime so this test source contains no literal control chars.
 const ESC = String.fromCharCode(27);
@@ -38,13 +38,38 @@ describe('detectLatestUrl', () => {
 	it('returns the last complete URL when several are present', () => {
 		expect(detectLatestUrl('https://a.test/1 then https://b.test/2 ')).toBe('https://b.test/2');
 	});
+
+	it('honors an accept predicate, returning the last accepted URL', () => {
+		expect(
+			detectLatestUrl(
+				'docs https://docs.test/x then https://id.test/oauth?client_id=1 ',
+				isLoginUrl
+			)
+		).toBe('https://id.test/oauth?client_id=1');
+	});
+});
+
+describe('isLoginUrl', () => {
+	it('accepts standard OAuth authorize / device URLs (agent-agnostic)', () => {
+		expect(isLoginUrl('https://claude.ai/oauth/authorize?client_id=x')).toBe(true);
+		expect(isLoginUrl('https://accounts.google.com/o/oauth2/v2/auth?response_type=code')).toBe(
+			true
+		);
+		expect(isLoginUrl('https://auth.openai.com/x?code_challenge=y')).toBe(true);
+		expect(isLoginUrl('https://example.com/device?user_code=ABCD')).toBe(true);
+	});
+
+	it('rejects incidental links (MOTD, docs)', () => {
+		expect(isLoginUrl('https://ubuntu.com/pro')).toBe(false);
+		expect(isLoginUrl('https://documentation.ubuntu.com/wsl/')).toBe(false);
+	});
 });
 
 describe('createUrlScanner', () => {
-	it('reconstructs a URL split by a cursor-move escape (wrap)', () => {
+	it('reconstructs a sign-in URL split by a cursor-move escape (wrap)', () => {
 		const s = createUrlScanner();
-		expect(s.push(`https://ex.test/very${ESC}[1Glongpath?a=1 `)).toBe(
-			'https://ex.test/verylongpath?a=1'
+		expect(s.push(`https://claude.ai/oauth/auth${ESC}[1Gorize?client_id=abc `)).toBe(
+			'https://claude.ai/oauth/authorize?client_id=abc'
 		);
 	});
 
@@ -52,20 +77,30 @@ describe('createUrlScanner', () => {
 		const s = createUrlScanner();
 		// ESC arrives at the end of one chunk; the rest of the cursor-move + URL
 		// tail arrives in the next. Stripping the whole accumulated tail rejoins it.
-		expect(s.push(`https://ex.test/a${ESC}`)).toBeNull();
-		expect(s.push('[1Gbcd ')).toBe('https://ex.test/abcd');
+		expect(s.push(`https://claude.ai/oauth/authorize?client_id=a${ESC}`)).toBeNull();
+		expect(s.push('[1Gbc ')).toBe('https://claude.ai/oauth/authorize?client_id=abc');
 	});
 
-	it('reassembles a URL split across chunks and emits it once', () => {
+	it('reassembles a sign-in URL split across chunks and emits it once', () => {
 		const s = createUrlScanner();
-		expect(s.push('https://ex.test/abc')).toBeNull(); // not yet terminated
-		expect(s.push('def ')).toBe('https://ex.test/abcdef');
+		expect(s.push('https://claude.ai/oauth/authorize?client_id=a')).toBeNull(); // not yet terminated
+		expect(s.push('bc ')).toBe('https://claude.ai/oauth/authorize?client_id=abc');
 		expect(s.push(' still here ')).toBeNull(); // same URL → not re-emitted
 	});
 
-	it('emits a new URL when a different one completes', () => {
+	it('emits a new sign-in URL when a different one completes', () => {
 		const s = createUrlScanner();
-		expect(s.push('https://one.test/x ')).toBe('https://one.test/x');
-		expect(s.push('https://two.test/y ')).toBe('https://two.test/y');
+		expect(s.push('https://one.test/oauth/authorize?client_id=1 ')).toBe(
+			'https://one.test/oauth/authorize?client_id=1'
+		);
+		expect(s.push('https://two.test/oauth/authorize?client_id=2 ')).toBe(
+			'https://two.test/oauth/authorize?client_id=2'
+		);
+	});
+
+	it('ignores incidental non-sign-in URLs (e.g. the MOTD)', () => {
+		const s = createUrlScanner();
+		expect(s.push('Welcome! Learn more at https://ubuntu.com/pro ')).toBeNull();
+		expect(s.push('Docs: https://documentation.ubuntu.com/wsl/ ')).toBeNull();
 	});
 });

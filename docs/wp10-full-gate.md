@@ -41,6 +41,13 @@ Do **not** start until item 1's `headSha` matches `main`.
 
 ## 2. Hyper-V VM setup (run on the Hyper-V host, elevated PowerShell)
 
+> **Automation:** `scripts/wp10/fullgate.ps1` wraps the repeatable parts of this gate
+> (VM create, checkpoints, revert, installer copy, failure induction, post-run guest
+> verification). The manual parts — installing Windows 11, the GUI wizard, and OAuth —
+> are unavoidable; the harness pauses for them. The commands below are what that script
+> runs, shown here so the steps are auditable. Quick start:
+> `\.fullgate.ps1 -Action create-vm -IsoPath C:\iso\Win11.iso`.
+
 Nested virtualization is required (WSL2 = a VM inside the guest) and is **incompatible with
 Dynamic Memory** — use static RAM. Size the disk so the happy path clears the 32 GiB
 *recommended* preflight bar, leaving room to later shrink free space below the 16 GiB *hard*

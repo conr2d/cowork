@@ -24,9 +24,15 @@ impl WslOps for WindowsWslOps {
 
 /// Non-elevated run that captures output (used for the `--version` probe).
 fn run_captured(op: WslOp) -> WslRun {
+    use std::os::windows::process::CommandExt;
     use std::process::Command;
+    use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
-    match Command::new("wsl.exe").args(op.args()).output() {
+    match Command::new("wsl.exe")
+        .creation_flags(CREATE_NO_WINDOW)
+        .args(op.args())
+        .output()
+    {
         Ok(out) => {
             let mut text = decode_wsl(&out.stdout);
             text.push_str(&decode_wsl(&out.stderr));

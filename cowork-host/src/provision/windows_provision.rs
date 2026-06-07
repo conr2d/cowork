@@ -13,6 +13,7 @@ use std::ffi::{OsStr, c_void};
 use std::fs::File;
 use std::io::Write;
 use std::os::windows::ffi::OsStrExt;
+use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
 use std::ptr;
@@ -24,6 +25,7 @@ use windows_sys::Win32::Networking::WinHttp::{
     WinHttpOpen, WinHttpOpenRequest, WinHttpQueryHeaders, WinHttpReadData, WinHttpReceiveResponse,
     WinHttpSendRequest, WinHttpSetTimeouts,
 };
+use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use super::url::split_https_url;
 use super::{
@@ -73,7 +75,11 @@ impl ProvisionOps for WindowsProvisionOps {
 /// Run `wsl.exe <args>` capturing output (provisioning runs unelevated — WSL is
 /// already enabled by WP4 — so there is no elevation path here).
 fn run_wsl(args: &[String]) -> ExecResult {
-    match Command::new("wsl.exe").args(args).output() {
+    match Command::new("wsl.exe")
+        .creation_flags(CREATE_NO_WINDOW)
+        .args(args)
+        .output()
+    {
         Ok(out) => {
             let mut text = decode_wsl(&out.stdout);
             text.push_str(&decode_wsl(&out.stderr));

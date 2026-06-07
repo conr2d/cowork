@@ -6,9 +6,11 @@
 //! is the pure, unit-tested `provision/inject.rs`.
 
 use std::io::{BufRead, BufReader};
+use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
 
 use cowork_errors::{Envelope, Stage};
+use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
 use crate::protocol::StreamParser;
 
@@ -28,7 +30,11 @@ pub fn inject_guest(src_binary: &str) -> Result<(), Envelope> {
             "copy {src_binary} -> {target}: {e}"
         )));
     }
-    match Command::new("wsl.exe").args(chmod_args()).output() {
+    match Command::new("wsl.exe")
+        .creation_flags(CREATE_NO_WINDOW)
+        .args(chmod_args())
+        .output()
+    {
         Ok(out) if out.status.success() => Ok(()),
         Ok(out) => Err(cli_inject_failed_envelope(&format!(
             "chmod exited {}",
@@ -51,7 +57,11 @@ pub fn setup_firstboot_user() -> Result<(), Envelope> {
 /// Run `wsl.exe <args>` to completion, mapping any failure to
 /// `distro.user_create_failed`. `what` labels the step in the (redacted) cause.
 fn run_root_wsl(args: &[String], what: &str) -> Result<(), Envelope> {
-    match Command::new("wsl.exe").args(args).output() {
+    match Command::new("wsl.exe")
+        .creation_flags(CREATE_NO_WINDOW)
+        .args(args)
+        .output()
+    {
         Ok(out) if out.status.success() => Ok(()),
         Ok(out) => Err(user_create_failed_envelope(&format!(
             "{what} exited {}",
@@ -76,6 +86,7 @@ pub fn run_guest(
     on_progress: &mut dyn FnMut(Stage, &str),
 ) -> RunOutcome {
     let mut child = match Command::new("wsl.exe")
+        .creation_flags(CREATE_NO_WINDOW)
         .args(launch_args(extra))
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

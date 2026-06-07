@@ -64,6 +64,17 @@ impl Agent {
             Agent::Antigravity => None,
         }
     }
+
+    /// Extra environment to run the installer unattended (skip interactive prompts).
+    /// codex's installer otherwise prompts `Start Codex now? [y/N]` by reading
+    /// `/dev/tty` directly (a closed stdin does not stop it), which hangs a headless
+    /// install; `CODEX_NON_INTERACTIVE=1` makes it take the default and continue.
+    pub fn installer_unattended_env(self) -> Option<(&'static str, &'static str)> {
+        match self {
+            Agent::Codex => Some(("CODEX_NON_INTERACTIVE", "1")),
+            Agent::Claude | Agent::Antigravity => None,
+        }
+    }
 }
 
 /// Absolute installed binary path for `agent`.
@@ -97,6 +108,9 @@ pub fn install_cmd(agent: Agent, home: &str) -> Cmd {
     let mut cmd = Cmd::new("bash", &["-c", &script]);
     if let Some(var) = agent.creds_env_var() {
         cmd = cmd.with_env(var, &creds_dir(agent, home));
+    }
+    if let Some((var, val)) = agent.installer_unattended_env() {
+        cmd = cmd.with_env(var, val);
     }
     cmd
 }
@@ -198,10 +212,13 @@ mod tests {
         assert!(c.args[1].ends_with("| sh"));
         assert_eq!(
             c.env,
-            vec![(
-                "CODEX_HOME".to_string(),
-                "/home/u/.cowork/creds/codex".to_string()
-            )]
+            vec![
+                (
+                    "CODEX_HOME".to_string(),
+                    "/home/u/.cowork/creds/codex".to_string()
+                ),
+                ("CODEX_NON_INTERACTIVE".to_string(), "1".to_string())
+            ]
         );
     }
 
@@ -211,6 +228,14 @@ mod tests {
         assert!(c.args[1].contains("https://antigravity.google/cli/install.sh"));
         assert!(c.args[1].ends_with("| bash"));
         assert!(c.env.is_empty());
+    }
+
+    #[test]
+    fn only_codex_install_cmd_sets_non_interactive_env() {
+        for agent in [Agent::Claude, Agent::Antigravity] {
+            let c = install_cmd(agent, "/home/u");
+            assert!(!c.env.iter().any(|(key, _)| key == "CODEX_NON_INTERACTIVE"));
+        }
     }
 
     #[test]

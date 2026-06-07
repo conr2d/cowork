@@ -4,16 +4,21 @@
 	import type { Terminal as XTerm } from '@xterm/xterm';
 	import '@xterm/xterm/css/xterm.css';
 
+	import * as m from '$lib/paraglide/messages';
 	import { base64ToBytes } from '$lib/terminal/decode';
+	import { createUrlScanner } from '$lib/terminal/links';
 
 	let {
 		distro = 'Cowork',
 		workspace = '~',
-		locale = 'en'
-	}: { distro?: string; workspace?: string; locale?: string } = $props();
+		locale = 'en',
+		detectLinks = false
+	}: { distro?: string; workspace?: string; locale?: string; detectLinks?: boolean } = $props();
 
 	let container: HTMLDivElement | undefined = $state();
 	let cleanup: (() => void) | undefined;
+	let detectedUrl = $state<string | null>(null);
+	let openUrl: ((url: string) => Promise<void>) | undefined;
 
 	async function loadCanvasFallback(term: XTerm): Promise<void> {
 		const { CanvasAddon } = await import('@xterm/addon-canvas');
@@ -34,7 +39,8 @@
 			const { WebglAddon } = await import('@xterm/addon-webgl');
 			const { invoke, Channel } = await import('@tauri-apps/api/core');
 			const { WebLinksAddon } = await import('@xterm/addon-web-links');
-			const { openUrl } = await import('@tauri-apps/plugin-opener');
+			const opener = await import('@tauri-apps/plugin-opener');
+			openUrl = opener.openUrl;
 
 			const term = new Terminal({
 				cursorBlink: true,
@@ -55,7 +61,7 @@
 			// so the host opens the browser, not the guest.
 			term.loadAddon(
 				new WebLinksAddon((_event, uri) => {
-					void openUrl(uri);
+					void openUrl!(uri);
 				})
 			);
 
@@ -77,8 +83,17 @@
 			// (a hardcoded default corrupts a full-screen TUI's first frame).
 			fit.fit();
 
+			const scanner = detectLinks ? createUrlScanner() : null;
+			const decoder = new TextDecoder();
 			const channel = new Channel<string>();
-			channel.onmessage = (chunk) => term.write(base64ToBytes(chunk));
+			channel.onmessage = (chunk) => {
+				const bytes = base64ToBytes(chunk);
+				term.write(bytes);
+				if (scanner) {
+					const url = scanner.push(decoder.decode(bytes, { stream: true }));
+					if (url) detectedUrl = url;
+				}
+			};
 
 			await invoke('pty_spawn', {
 				onData: channel,
@@ -111,11 +126,33 @@
 	onDestroy(() => cleanup?.());
 </script>
 
-<div bind:this={container} class="terminal-host"></div>
+<div class="terminal-wrap">
+	{#if detectLinks && detectedUrl}
+		<button
+			type="button"
+			class="flex items-center gap-2 self-start rounded bg-neutral-100 px-3 py-1.5 text-sm font-medium text-neutral-900 hover:bg-neutral-200"
+			onclick={() => {
+				if (detectedUrl && openUrl) void openUrl(detectedUrl);
+			}}
+		>
+			<span aria-hidden="true">🔗</span>
+			<span>{m.auth_open_login()}</span>
+		</button>
+	{/if}
+	<div bind:this={container} class="terminal-host"></div>
+</div>
 
 <style>
-	.terminal-host {
+	.terminal-wrap {
+		display: flex;
 		height: 100%;
 		width: 100%;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+	.terminal-host {
+		min-height: 0;
+		width: 100%;
+		flex: 1 1 auto;
 	}
 </style>

@@ -30,6 +30,6 @@
 		</div>
 	</div>
 	<div class="min-h-0 flex-1 bg-neutral-900 p-2">
-		<Terminal distro="Cowork" workspace="~/cowork" {locale} />
+		<Terminal distro="Cowork" workspace="~/cowork" {locale} detectLinks />
 	</div>
 </main>

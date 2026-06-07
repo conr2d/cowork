@@ -35,5 +35,6 @@
 	"error_retrying": "再試行中…",
 	"auth_title": "エージェントにサインイン",
 	"auth_body": "下のターミナルでログインを開始するエージェントを選び、画面の手順に従ってください。",
-	"auth_login": "{agent} にログイン"
+	"auth_login": "{agent} にログイン",
+	"auth_open_login": "サインインページを開く"
 }

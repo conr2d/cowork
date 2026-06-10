@@ -2,8 +2,9 @@
 //! Not compiled on Linux/CI-ubuntu; verified by compile+clippy on the
 //! windows-latest runner and by the local windows-gnu cross-check.
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, c_void};
 use std::os::windows::ffi::OsStrExt;
+use std::ptr;
 
 use cowork_errors::{Code, Envelope, Stage};
 
@@ -19,6 +20,10 @@ impl WslOps for WindowsWslOps {
         } else {
             run_captured(op)
         }
+    }
+
+    fn is_online(&self) -> bool {
+        probe_online()
     }
 }
 
@@ -158,4 +163,81 @@ fn internal(detail: String) -> Envelope {
 
 fn wide_null(value: &str) -> Vec<u16> {
     OsStr::new(value).encode_wide().chain(Some(0)).collect()
+}
+
+/// RAII guard closing a WinHTTP handle on drop (reverse declaration order closes
+/// request -> connect -> session). Duplicated from `provision::windows_provision`
+/// to keep the `wsl` and `provision` modules decoupled (same rationale as the
+/// duplicated `decode_wsl`/`wide_null`).
+struct WinHttpHandle(*mut c_void);
+
+impl Drop for WinHttpHandle {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe {
+                windows_sys::Win32::Networking::WinHttp::WinHttpCloseHandle(self.0);
+            }
+        }
+    }
+}
+
+/// Best-effort proxy-aware connectivity probe: HEAD https://www.microsoft.com/
+/// using WinHTTP with WPAD/PAC auto-proxy (so it is correct behind corporate
+/// proxies, where a raw TCP probe would falsely report offline). Returns `true`
+/// if any HTTP response is received, `false` if the request cannot be sent or no
+/// response arrives. Short timeouts so a truly offline machine fails fast.
+fn probe_online() -> bool {
+    use windows_sys::Win32::Networking::WinHttp::{
+        INTERNET_DEFAULT_HTTPS_PORT, WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_FLAG_SECURE,
+        WinHttpConnect, WinHttpOpen, WinHttpOpenRequest, WinHttpReceiveResponse,
+        WinHttpSendRequest, WinHttpSetTimeouts,
+    };
+
+    let agent = wide_null("Cowork");
+    let host = wide_null("www.microsoft.com");
+    let verb = wide_null("HEAD");
+
+    unsafe {
+        let session = WinHttpHandle(WinHttpOpen(
+            agent.as_ptr(),
+            WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+            ptr::null(),
+            ptr::null(),
+            0,
+        ));
+        if session.0.is_null() {
+            return false;
+        }
+        // resolve / connect / send / receive timeouts (ms) - short so an offline
+        // box fails fast instead of hanging the wizard.
+        WinHttpSetTimeouts(session.0, 5000, 5000, 5000, 5000);
+
+        let connect = WinHttpHandle(WinHttpConnect(
+            session.0,
+            host.as_ptr(),
+            INTERNET_DEFAULT_HTTPS_PORT,
+            0,
+        ));
+        if connect.0.is_null() {
+            return false;
+        }
+
+        let request = WinHttpHandle(WinHttpOpenRequest(
+            connect.0,
+            verb.as_ptr(),
+            ptr::null(), // path -> "/"
+            ptr::null(), // HTTP/1.1
+            ptr::null(), // no referer
+            ptr::null(), // default accept types
+            WINHTTP_FLAG_SECURE,
+        ));
+        if request.0.is_null() {
+            return false;
+        }
+
+        if WinHttpSendRequest(request.0, ptr::null(), 0, ptr::null(), 0, 0, 0) == 0 {
+            return false;
+        }
+        WinHttpReceiveResponse(request.0, ptr::null_mut()) != 0
+    }
 }

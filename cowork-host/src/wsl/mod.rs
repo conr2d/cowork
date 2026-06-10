@@ -41,6 +41,12 @@ pub enum WslRun {
 pub trait WslOps {
     /// Run `wsl.exe` for `op`; `op.needs_elevation()` decides whether to elevate.
     fn run(&self, op: WslOp) -> WslRun;
+
+    /// Probe general internet connectivity (proxy-aware). Used to disambiguate a
+    /// network-dependent failure (`wsl --install`/`--update` downloads from
+    /// Microsoft) from a WSL-specific one: if this returns `false`, the cause is
+    /// the user's connection, not WSL. Best-effort; returns `true` when unsure.
+    fn is_online(&self) -> bool;
 }
 
 /// Outcome of [`enable_wsl`].
@@ -73,6 +79,14 @@ fn wsl_not_found_envelope() -> Envelope {
 /// render the reboot affordance that accompanies `WslEnableOutcome::RebootRequired`.
 pub fn reboot_required_envelope() -> Envelope {
     Envelope::new(Code::WslRebootRequired, Stage::WslEnable)
+}
+
+/// `common.network_failed` (Transient) — a network-dependent WSL step failed and
+/// the connectivity probe found no internet, so the cause is the user's
+/// connection. `httpStatus` 0 means no HTTP response was obtained (offline),
+/// matching the provision download convention.
+fn network_failed_envelope() -> Envelope {
+    Envelope::new(Code::CommonNetworkFailed, Stage::WslEnable).with_context("httpStatus", "0")
 }
 
 /// What the `--version` probe told us about the installed WSL app.
@@ -131,6 +145,8 @@ fn run_update(ops: &dyn WslOps) -> WslEnableOutcome {
         WslRun::Completed { exit_code, output } => {
             if is_inbox_unsupported(exit_code, &output) {
                 WslEnableOutcome::Failed(inbox_unsupported_envelope())
+            } else if !ops.is_online() {
+                WslEnableOutcome::Failed(network_failed_envelope())
             } else {
                 WslEnableOutcome::Failed(
                     run_failure_envelope(WslOp::Update, exit_code)
@@ -149,6 +165,8 @@ fn run_install(ops: &dyn WslOps) -> WslEnableOutcome {
         WslRun::Completed { exit_code, output } => {
             if is_inbox_unsupported(exit_code, &output) {
                 WslEnableOutcome::Failed(inbox_unsupported_envelope())
+            } else if !ops.is_online() {
+                WslEnableOutcome::Failed(network_failed_envelope())
             } else {
                 WslEnableOutcome::Failed(
                     run_failure_envelope(WslOp::Install, exit_code)

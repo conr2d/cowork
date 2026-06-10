@@ -11,12 +11,21 @@ use cowork_host::wsl::{
 
 struct ScriptedOps {
     runs: RefCell<VecDeque<WslRun>>,
+    online: bool,
 }
 
 impl ScriptedOps {
     fn new(runs: Vec<WslRun>) -> Self {
         Self {
             runs: RefCell::new(runs.into()),
+            online: true,
+        }
+    }
+
+    fn offline(runs: Vec<WslRun>) -> Self {
+        Self {
+            runs: RefCell::new(runs.into()),
+            online: false,
         }
     }
 }
@@ -27,6 +36,10 @@ impl WslOps for ScriptedOps {
             .borrow_mut()
             .pop_front()
             .expect("scripted WSL operation missing response")
+    }
+
+    fn is_online(&self) -> bool {
+        self.online
     }
 }
 
@@ -163,6 +176,16 @@ fn enable_wsl_old_update_nonzero() {
 }
 
 #[test]
+fn update_failure_while_offline_maps_to_network_failed() {
+    // Same script as enable_wsl_old_update_nonzero, but offline.
+    let ops = ScriptedOps::offline(vec![
+        completed(0, "WSL version: 2.4.3.0\n..."),
+        completed(1, ""),
+    ]);
+    assert_failed(enable_wsl(&ops), Code::CommonNetworkFailed, Kind::Transient);
+}
+
+#[test]
 fn enable_wsl_absent_install_success() {
     let ops = ScriptedOps::new(vec![completed(0, ""), completed(0, "")]);
     assert!(matches!(enable_wsl(&ops), WslEnableOutcome::RebootRequired));
@@ -194,6 +217,14 @@ fn enable_wsl_install_nonzero() {
     let ops = ScriptedOps::new(vec![completed(0, ""), completed(2, "")]);
     let env = assert_failed(enable_wsl(&ops), Code::WslInstallFailed, Kind::Transient);
     assert_eq!(env.context.get("exitCode").map(String::as_str), Some("2"));
+}
+
+#[test]
+fn install_failure_while_offline_maps_to_network_failed() {
+    // Same script as enable_wsl_install_nonzero, but offline -> the install
+    // failure is attributed to connectivity, not WSL.
+    let ops = ScriptedOps::offline(vec![completed(0, ""), completed(2, "")]);
+    assert_failed(enable_wsl(&ops), Code::CommonNetworkFailed, Kind::Transient);
 }
 
 #[test]

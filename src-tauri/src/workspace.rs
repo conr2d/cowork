@@ -7,10 +7,11 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cowork_errors::{Code, Envelope, Stage};
+use cowork_host::provision::{DISTRO_NAME, WSL_USER};
 use cowork_host::workspace::metadata::MetadataStore;
 use cowork_host::workspace::{
     CreateRequest, WindowsWorkspaceOps, WorkspaceMeta, WorkspacePatch, create_workspace,
-    delete_workspace, list_workspaces, slug, update_workspace,
+    delete_workspace, list_workspaces, open_files_target, slug, update_workspace,
 };
 
 fn metadata_path() -> Result<PathBuf, Envelope> {
@@ -94,6 +95,23 @@ pub async fn workspace_slug_preview(name: String) -> Result<String, Envelope> {
         let all = store.load()?;
         let existing = all.iter().map(|m| m.slug.clone()).collect::<Vec<_>>();
         slug::slug_from_name(&name, &existing)
+    })
+    .await
+    .map_err(join_envelope(Stage::Workspace))?
+}
+
+/// Open the workspace's `files/` directory in Windows Explorer over the
+/// `\\wsl.localhost` share (accessing the share starts the distro on demand).
+#[tauri::command]
+pub async fn workspace_open_files(slug: String) -> Result<(), Envelope> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = MetadataStore::new(metadata_path()?);
+        let target = open_files_target(&store, DISTRO_NAME, WSL_USER, &slug)?;
+        tauri_plugin_opener::open_path(&target, None::<&str>).map_err(|e| {
+            Envelope::new(Code::WorkspaceOpenFilesFailed, Stage::Workspace)
+                .with_context("slug", &slug)
+                .with_cause(&e.to_string())
+        })
     })
     .await
     .map_err(join_envelope(Stage::Workspace))?

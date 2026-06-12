@@ -42,6 +42,7 @@ pub fn run() {
             workspace::workspace_update,
             workspace::workspace_delete,
             workspace::workspace_slug_preview,
+            workspace::workspace_open_files,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

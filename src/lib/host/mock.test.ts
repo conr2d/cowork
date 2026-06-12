@@ -90,4 +90,22 @@ describe('createMockHost', () => {
 		await host.workspaceDelete('default');
 		expect(await host.workspaceList()).toEqual([]);
 	});
+
+	it('opens files for an existing workspace', async () => {
+		const host = createMockHost();
+		await expect(host.workspaceOpenFiles('default')).resolves.toBeUndefined();
+	});
+
+	it('rejects open files for an unknown workspace', async () => {
+		const host = createMockHost();
+		await expect(host.workspaceOpenFiles('missing')).rejects.toMatchObject({
+			code: 'workspace.not_found'
+		});
+	});
+
+	it('rejects open files with injected failure', async () => {
+		const envelope = { code: 'workspace.open_files_failed', kind: 'Internal', stage: 'workspace' };
+		const host = createMockHost({ failWith: { workspaceOpenFiles: envelope } });
+		await expect(host.workspaceOpenFiles('default')).rejects.toEqual(envelope);
+	});
 });

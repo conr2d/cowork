@@ -17,6 +17,7 @@ export interface Shell {
 	create(name: string, agent: AgentId, preset: string): Promise<void>;
 	rename(slug: string, name: string): Promise<void>;
 	remove(slug: string): Promise<void>;
+	openFiles(slug: string): Promise<void>;
 	setPinned(slug: string, pinned: boolean): Promise<void>;
 	reorderPinned(slugs: readonly string[]): Promise<void>;
 }
@@ -120,6 +121,14 @@ export function createShell(host: HostClient): Shell {
 				await host.workspaceDelete(slug);
 				workspaces = workspaces.filter((workspace) => workspace.slug !== slug);
 				if (activeSlug === slug) selectLocal(initialSlug(workspaces));
+				error = null;
+			} catch (caught) {
+				error = asEnvelope(caught);
+			}
+		},
+		async openFiles(slug) {
+			try {
+				await host.workspaceOpenFiles(slug);
 				error = null;
 			} catch (caught) {
 				error = asEnvelope(caught);

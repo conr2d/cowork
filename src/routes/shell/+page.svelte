@@ -104,7 +104,15 @@
 				<span class="ctx-path">~/workspaces/{shell.active.slug}</span>
 			{/if}
 			<span class="ctx-spacer"></span>
-			<button type="button" class="btn" disabled title={m.shell_files()}>
+			<button
+				type="button"
+				class="btn"
+				disabled={!shell.active}
+				title={m.shell_files()}
+				onclick={() => {
+					if (shell.active) void shell.openFiles(shell.active.slug);
+				}}
+			>
 				<svg viewBox="0 0 24 24" width="15" height="15">
 					<path
 						d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"
@@ -163,7 +171,14 @@
 			<button type="button" class="rowmenu-item" onclick={() => startRename(menuWorkspace.slug)}
 				>{m.ws_menu_rename()}</button
 			>
-			<button type="button" class="rowmenu-item" disabled>{m.ws_menu_open_files()}</button>
+			<button
+				type="button"
+				class="rowmenu-item"
+				onclick={() => {
+					void shell.openFiles(menuWorkspace.slug);
+					menuFor = null;
+				}}>{m.ws_menu_open_files()}</button
+			>
 			<button
 				type="button"
 				class="rowmenu-item danger"

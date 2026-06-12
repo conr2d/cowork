@@ -18,6 +18,28 @@ pub const WORKSPACES_DIR: &str = "workspaces";
 pub const FILES_DIR: &str = "files";
 pub const DEFAULT_WORKSPACE_SLUG: &str = "default";
 
+/// The Windows-side UNC path of a workspace's `files/` I/O zone
+/// (`\\wsl.localhost\<distro>\home\<user>\workspaces\<slug>\files`). Single
+/// source of the Explorer-facing path convention.
+pub fn files_unc_path(distro: &str, user: &str, slug: &str) -> String {
+    format!(r"\\wsl.localhost\{distro}\home\{user}\{WORKSPACES_DIR}\{slug}\{FILES_DIR}")
+}
+
+/// Resolve the Explorer target for `slug`: the workspace must exist in the
+/// metadata store (stale UI must not open arbitrary paths). Returns the UNC path.
+pub fn open_files_target(
+    store: &metadata::MetadataStore,
+    distro: &str,
+    user: &str,
+    slug: &str,
+) -> Result<String, Envelope> {
+    let all = store.load()?;
+    if !all.iter().any(|m| m.slug == slug) {
+        return Err(not_found(slug));
+    }
+    Ok(files_unc_path(distro, user, slug))
+}
+
 /// Runs the injected guest CLI with the given extra args. Trait seam so flows
 /// are unit-testable off-Windows (mirror of provision's ops seams).
 pub trait WorkspaceGuestOps {

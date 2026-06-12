@@ -195,6 +195,12 @@ export function createMockHost(options: MockHostOptions = {}): HostClient {
 				name,
 				workspaces.map((workspace) => workspace.slug)
 			);
+		},
+		workspaceOpenFiles: async (slug: string) => {
+			if ('workspaceOpenFiles' in fail) return Promise.reject(fail.workspaceOpenFiles);
+			if (!workspaces.some((workspace) => workspace.slug === slug)) {
+				return Promise.reject(workspaceEnvelope('workspace.not_found', 'Internal', { slug }));
+			}
 		}
 	};
 }

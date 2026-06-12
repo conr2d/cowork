@@ -33,6 +33,7 @@ export interface HostClient {
 	workspaceUpdate(slug: string, patch: WorkspacePatch): Promise<WorkspaceDto>;
 	workspaceDelete(slug: string): Promise<void>;
 	workspaceSlugPreview(name: string): Promise<string>;
+	workspaceOpenFiles(slug: string): Promise<void>;
 }
 
 /** A Tauri command rejection is the serialized backend `Envelope`. */
@@ -109,5 +110,9 @@ export const tauriHost: HostClient = {
 	async workspaceSlugPreview(name) {
 		const { invoke } = await import('@tauri-apps/api/core');
 		return invoke<string>('workspace_slug_preview', { name });
+	},
+	async workspaceOpenFiles(slug) {
+		const { invoke } = await import('@tauri-apps/api/core');
+		await invoke('workspace_open_files', { slug });
 	}
 };

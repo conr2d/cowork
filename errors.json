@@ -58,6 +58,7 @@
 		"workspace.not_found": { "kind": "Internal", "contextKeys": ["slug"] },
 		"workspace.create_failed": { "kind": "Internal", "contextKeys": ["slug"] },
 		"workspace.delete_failed": { "kind": "Internal", "contextKeys": ["slug"] },
+		"workspace.open_files_failed": { "kind": "Internal", "contextKeys": ["slug"] },
 		"workspace.metadata_io_failed": { "kind": "Internal", "contextKeys": ["op"] },
 		"workspace.metadata_corrupt": { "kind": "Internal", "contextKeys": [] },
 

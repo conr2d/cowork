@@ -9,7 +9,7 @@ use cowork_host::workspace::metadata::MetadataStore;
 use cowork_host::workspace::slug::slug_from_name;
 use cowork_host::workspace::{
     CreateRequest, SessionMeta, WorkspaceGuestOps, WorkspaceMeta, WorkspacePatch, create_workspace,
-    delete_workspace, update_workspace,
+    delete_workspace, files_unc_path, open_files_target, update_workspace,
 };
 
 struct TempDir {
@@ -227,6 +227,38 @@ fn delete_absent_metadata_after_guest_done_is_ok() {
     let ops = MockOps::done();
     delete_workspace(&ops, &store, "missing").unwrap();
     assert_eq!(store.load().unwrap(), Vec::<WorkspaceMeta>::new());
+}
+
+#[test]
+fn files_unc_path_builds_windows_explorer_path() {
+    assert_eq!(
+        files_unc_path("Cowork", "cowork", "pdf-translate"),
+        r"\\wsl.localhost\Cowork\home\cowork\workspaces\pdf-translate\files"
+    );
+}
+
+#[test]
+fn open_files_target_resolves_existing_workspace() {
+    let temp = TempDir::new();
+    let store = store(temp.path.join("workspaces.json"));
+    store.save(&[meta("pdf-translate")]).unwrap();
+    assert_eq!(
+        open_files_target(&store, "Cowork", "cowork", "pdf-translate").unwrap(),
+        r"\\wsl.localhost\Cowork\home\cowork\workspaces\pdf-translate\files"
+    );
+}
+
+#[test]
+fn open_files_target_rejects_unknown_workspace() {
+    let temp = TempDir::new();
+    let store = store(temp.path.join("workspaces.json"));
+    store.save(&[meta("default")]).unwrap();
+    assert_eq!(
+        open_files_target(&store, "Cowork", "cowork", "missing")
+            .unwrap_err()
+            .code,
+        Code::WorkspaceNotFound
+    );
 }
 
 #[test]

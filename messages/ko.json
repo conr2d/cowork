@@ -36,5 +36,6 @@
 	"auth_title": "에이전트에 로그인",
 	"auth_body": "아래 터미널에서 로그인을 시작할 에이전트를 선택한 후 화면의 안내를 따르세요.",
 	"auth_login": "{agent} 로그인",
-	"auth_open_login": "로그인 페이지 열기"
+	"auth_open_login": "로그인 페이지 열기",
+	"auth_finish": "Cowork 열기"
 }

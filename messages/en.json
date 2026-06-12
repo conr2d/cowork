@@ -37,5 +37,6 @@
 	"auth_title": "Sign in to your agents",
 	"auth_body": "Select an agent to start its login in the terminal below, then follow the on-screen steps.",
 	"auth_login": "Log in to {agent}",
-	"auth_open_login": "Open sign-in page"
+	"auth_open_login": "Open sign-in page",
+	"auth_finish": "Open Cowork"
 }

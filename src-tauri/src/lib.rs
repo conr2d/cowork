@@ -35,6 +35,8 @@ pub fn run() {
             setup::is_resume_launch,
             setup::get_resume_state,
             setup::clear_resume,
+            setup::setup_is_complete,
+            setup::setup_mark_complete,
             workspace::workspace_create,
             workspace::workspace_list,
             workspace::workspace_update,

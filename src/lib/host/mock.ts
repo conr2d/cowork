@@ -22,6 +22,7 @@ export interface MockHostOptions {
 	agentInstallSteps?: ProgressEvent[];
 	resumeLaunch?: boolean;
 	resumeState?: ResumeDto | null;
+	setupComplete?: boolean;
 	/** If set, the named method rejects with this value (an Envelope). */
 	failWith?: Partial<Record<keyof HostClient, unknown>>;
 }
@@ -95,6 +96,7 @@ function previewSlug(name: string, existing: string[]): string {
 export function createMockHost(options: MockHostOptions = {}): HostClient {
 	const fail = options.failWith ?? {};
 	const workspaces: WorkspaceDto[] = [{ ...DEFAULT_WORKSPACE }];
+	let setupComplete = options.setupComplete ?? false;
 	const rejectIf = <T>(method: keyof HostClient, value: T): Promise<T> =>
 		method in fail ? Promise.reject(fail[method]) : Promise.resolve(value);
 
@@ -131,6 +133,11 @@ export function createMockHost(options: MockHostOptions = {}): HostClient {
 		isResumeLaunch: () => rejectIf('isResumeLaunch', options.resumeLaunch ?? false),
 		getResumeState: () => rejectIf('getResumeState', options.resumeState ?? null),
 		clearResume: () => rejectIf('clearResume', undefined),
+		setupIsComplete: () => rejectIf('setupIsComplete', setupComplete),
+		setupMarkComplete: async () => {
+			if ('setupMarkComplete' in fail) return Promise.reject(fail.setupMarkComplete);
+			setupComplete = true;
+		},
 		workspaceCreate: async (name: string, defaultAgent: AgentId, preset: string) => {
 			if ('workspaceCreate' in fail) return Promise.reject(fail.workspaceCreate);
 			const slug = previewSlug(

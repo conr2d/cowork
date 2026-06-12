@@ -26,6 +26,8 @@ export interface HostClient {
 	isResumeLaunch(): Promise<boolean>;
 	getResumeState(): Promise<ResumeDto | null>;
 	clearResume(): Promise<void>;
+	setupIsComplete(): Promise<boolean>;
+	setupMarkComplete(): Promise<void>;
 	workspaceCreate(name: string, defaultAgent: AgentId, preset: string): Promise<WorkspaceDto>;
 	workspaceList(): Promise<WorkspaceDto[]>;
 	workspaceUpdate(slug: string, patch: WorkspacePatch): Promise<WorkspaceDto>;
@@ -79,6 +81,14 @@ export const tauriHost: HostClient = {
 	async clearResume() {
 		const { invoke } = await import('@tauri-apps/api/core');
 		await invoke('clear_resume');
+	},
+	async setupIsComplete() {
+		const { invoke } = await import('@tauri-apps/api/core');
+		return invoke<boolean>('setup_is_complete');
+	},
+	async setupMarkComplete() {
+		const { invoke } = await import('@tauri-apps/api/core');
+		await invoke('setup_mark_complete');
 	},
 	async workspaceCreate(name, defaultAgent, preset) {
 		const { invoke } = await import('@tauri-apps/api/core');

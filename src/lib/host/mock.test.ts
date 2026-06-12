@@ -40,6 +40,19 @@ describe('createMockHost', () => {
 		expect(await host.getResumeState()).toEqual({ stage: 'WslReady', selectedAgents: ['codex'] });
 	});
 
+	it('tracks setup completion after marking complete', async () => {
+		const host = createMockHost();
+		expect(await host.setupIsComplete()).toBe(false);
+		await host.setupMarkComplete();
+		expect(await host.setupIsComplete()).toBe(true);
+	});
+
+	it('rejects setupMarkComplete when failWith is set', async () => {
+		const envelope = { code: 'host.setup_marker_failed', kind: 'Internal', stage: 'done' };
+		const host = createMockHost({ failWith: { setupMarkComplete: envelope } });
+		await expect(host.setupMarkComplete()).rejects.toEqual(envelope);
+	});
+
 	it('creates workspaces with derived slugs and grows the list', async () => {
 		const host = createMockHost();
 		const created = await host.workspaceCreate('PDF Translate', 'codex', 'blank');

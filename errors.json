@@ -22,6 +22,7 @@
 		"wsl.elevation_denied": { "kind": "NeedsUserAction", "contextKeys": [] },
 		"wsl.reboot_required": { "kind": "NeedsUserAction", "contextKeys": [] },
 		"host.resume_state_corrupt": { "kind": "Internal", "contextKeys": ["detail"] },
+		"host.setup_marker_failed": { "kind": "Internal", "contextKeys": ["detail"] },
 
 		"distro.install_failed": { "kind": "Transient", "contextKeys": ["exitCode"] },
 		"distro.rootfs_fetch_failed": { "kind": "Transient", "contextKeys": ["url", "httpStatus"] },

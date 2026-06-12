@@ -15,6 +15,7 @@ use cowork_host::provision::{
     ProvisionOutcome, RunOutcome, WindowsProvisionOps, inject_guest, provision, remove_cowork,
     run_guest, setup_firstboot_user,
 };
+use cowork_host::setup_marker::{clear_setup_marker, is_setup_complete, mark_setup_complete};
 use cowork_host::wsl::{
     ResumeStage, ResumeState, WindowsWslOps, WslEnableOutcome, arm_resume, clear_resume_state,
     disarm_resume, enable_wsl, load_resume_state, save_resume_state,
@@ -72,6 +73,19 @@ fn resume_state_path() -> Result<PathBuf, Envelope> {
             .with_context("detail", format!("create {}: {e}", dir.display()))
     })?;
     dir.push("resume.json");
+    Ok(dir)
+}
+
+/// `%LOCALAPPDATA%\Cowork\setup-complete.json` — written when the wizard
+/// finishes; its presence boots the app into the shell.
+fn setup_marker_path() -> Result<PathBuf, Envelope> {
+    let base = std::env::var_os("LOCALAPPDATA").ok_or_else(|| {
+        Envelope::new(Code::HostSetupMarkerFailed, Stage::Done)
+            .with_context("detail", "LOCALAPPDATA is not set")
+    })?;
+    let mut dir = PathBuf::from(base);
+    dir.push("Cowork");
+    dir.push("setup-complete.json");
     Ok(dir)
 }
 
@@ -247,11 +261,28 @@ pub async fn remove_cowork_distro() -> Result<(), Envelope> {
         if let Ok(path) = resume_state_path() {
             let _ = clear_resume_state(&path);
         }
+        if let Ok(path) = setup_marker_path() {
+            clear_setup_marker(&path);
+        }
         let _ = disarm_resume();
         Ok(())
     })
     .await
     .map_err(join_envelope(Stage::Provision))?
+}
+
+/// True if setup has completed on this machine.
+#[tauri::command]
+pub fn setup_is_complete() -> bool {
+    setup_marker_path()
+        .map(|p| is_setup_complete(&p))
+        .unwrap_or(false)
+}
+
+/// Mark setup complete (wizard finish). Idempotent.
+#[tauri::command]
+pub fn setup_mark_complete() -> Result<(), Envelope> {
+    mark_setup_complete(&setup_marker_path()?)
 }
 
 /// True if the process was relaunched by RunOnce after a reboot (`--resume`).

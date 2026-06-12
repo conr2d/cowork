@@ -7,11 +7,14 @@
 	import Terminal from '$lib/components/Terminal.svelte';
 	import { AGENT_CHOICES } from './agents';
 
-	let { agents }: { agents: readonly AgentId[] } = $props();
+	let { agents, onFinish }: { agents: readonly AgentId[]; onFinish: () => Promise<void> } =
+		$props();
 
 	const locale = getLocale();
 	const choices = $derived(AGENT_CHOICES.filter((choice) => agents.includes(choice.id)));
 	let loginAttempts = $state(0);
+	let finishing = $state(false);
+	let finishFailed = $state(false);
 </script>
 
 <main class="flex min-h-screen flex-col bg-neutral-50 text-neutral-900">
@@ -31,6 +34,29 @@
 					{m.auth_login({ agent: choice.name })}
 				</button>
 			{/each}
+		</div>
+		<div class="flex items-center gap-3">
+			<button
+				type="button"
+				class="rounded border border-neutral-900 px-4 py-2 text-sm font-semibold text-neutral-900 hover:bg-neutral-100 disabled:opacity-50"
+				disabled={finishing}
+				onclick={async () => {
+					finishing = true;
+					finishFailed = false;
+					try {
+						await onFinish();
+					} catch {
+						finishFailed = true;
+					} finally {
+						finishing = false;
+					}
+				}}
+			>
+				{m.auth_finish()} →
+			</button>
+			{#if finishFailed}
+				<span class="text-sm text-red-700">{m.error_internal_body()}</span>
+			{/if}
 		</div>
 	</div>
 	<div class="min-h-0 flex-1 bg-neutral-900 p-2">

@@ -6,7 +6,7 @@
 	import LanguageStep from './LanguageStep.svelte';
 	import RunnerView from './RunnerView.svelte';
 
-	let { wizard }: { wizard: Wizard } = $props();
+	let { wizard, onFinish }: { wizard: Wizard; onFinish: () => Promise<void> } = $props();
 
 	onMount(() => {
 		void wizard.bootstrap();
@@ -24,7 +24,7 @@
 		onContinue={() => wizard.next()}
 	/>
 {:else if wizard.step === 'auth' || wizard.step === 'done'}
-	<AuthStep agents={wizard.selectedAgents} />
+	<AuthStep agents={wizard.selectedAgents} {onFinish} />
 {:else}
 	<RunnerView {wizard} />
 {/if}

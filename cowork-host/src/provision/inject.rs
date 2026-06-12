@@ -43,6 +43,13 @@ pub fn chmod_args() -> Vec<String> {
     ]
 }
 
+/// Stale-guest check (upgrade healing): re-inject unless the installed guest
+/// byte-matches the shipped one. A missing/unreadable installed binary counts
+/// as stale.
+pub fn needs_inject(shipped: &[u8], installed: Option<&[u8]>) -> bool {
+    installed != Some(shipped)
+}
+
 /// `wsl -d Cowork -- /usr/local/bin/cowork <extra...>` — invoke the injected
 /// guest CLI (it emits the JSON-lines protocol on stdout).
 pub fn launch_args(extra: &[String]) -> Vec<String> {
@@ -238,6 +245,21 @@ mod tests {
                 "/usr/local/bin/cowork".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn needs_inject_is_false_for_identical_bytes() {
+        assert!(!needs_inject(b"shipped", Some(b"shipped")));
+    }
+
+    #[test]
+    fn needs_inject_is_true_for_different_bytes() {
+        assert!(needs_inject(b"shipped", Some(b"installed")));
+    }
+
+    #[test]
+    fn needs_inject_is_true_for_missing_installed_binary() {
+        assert!(needs_inject(b"shipped", None));
     }
 
     #[test]

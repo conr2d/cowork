@@ -16,7 +16,7 @@ use crate::protocol::{HostEvent, StreamParser};
 
 use super::inject::{
     RunOutcome, chmod_args, classify_run, cli_inject_failed_envelope, cli_launch_failed_envelope,
-    firstboot_setup_args, launch_args, terminate_args, unc_inject_path,
+    firstboot_setup_args, launch_args, needs_inject, terminate_args, unc_inject_path,
 };
 use super::user_create_failed_envelope;
 
@@ -42,6 +42,22 @@ pub fn inject_guest(src_binary: &str) -> Result<(), Envelope> {
         ))),
         Err(e) => Err(cli_inject_failed_envelope(&format!("launch chmod: {e}"))),
     }
+}
+
+/// Upgrade healing (shell boot): re-inject the guest CLI when the installed
+/// binary differs from the shipped one. Returns whether an injection ran.
+/// An unreadable installed binary (missing file, distro not yet started in a
+/// broken state) counts as stale; a failed read of the SHIPPED binary is a
+/// real error.
+pub fn sync_guest(src_binary: &str) -> Result<bool, Envelope> {
+    let shipped = std::fs::read(src_binary)
+        .map_err(|e| cli_inject_failed_envelope(&format!("read shipped {src_binary}: {e}")))?;
+    let installed = std::fs::read(unc_inject_path()).ok();
+    if !needs_inject(&shipped, installed.as_deref()) {
+        return Ok(false);
+    }
+    inject_guest(src_binary)?;
+    Ok(true)
 }
 
 /// Create the non-root firstboot user, set it as the distro default, and

@@ -13,7 +13,7 @@ use cowork_errors::{Code, Envelope, Stage};
 use cowork_host::preflight::{PreflightReport, WindowsProbe, run_preflight};
 use cowork_host::provision::{
     ProvisionOutcome, RunOutcome, WindowsProvisionOps, inject_guest, provision, remove_cowork,
-    run_guest, setup_firstboot_user,
+    run_guest, setup_firstboot_user, sync_guest,
 };
 use cowork_host::setup_marker::{clear_setup_marker, is_setup_complete, mark_setup_complete};
 use cowork_host::wsl::{
@@ -203,6 +203,20 @@ pub async fn provision_run() -> Result<ProvisionDto, Envelope> {
         inject_guest(&src)?;
         setup_firstboot_user()?;
         Ok(dto)
+    })
+    .await
+    .map_err(join_envelope(Stage::Provision))?
+}
+
+/// Upgrade healing: re-inject the embedded guest CLI when the distro's
+/// installed copy differs (an app upgrade leaves a stale guest behind —
+/// missing subcommands, old protocol). Called by the shell at boot.
+/// Returns whether an injection ran.
+#[tauri::command]
+pub async fn guest_sync() -> Result<bool, Envelope> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let src = resolve_guest_binary()?;
+        sync_guest(&src)
     })
     .await
     .map_err(join_envelope(Stage::Provision))?

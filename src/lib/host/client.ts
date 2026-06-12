@@ -21,6 +21,8 @@ export interface HostClient {
 	preflightRun(): Promise<PreflightReport>;
 	wslEnable(selectedAgents: AgentId[]): Promise<WslEnableDto>;
 	provisionRun(): Promise<ProvisionDto>;
+	/** Re-inject the guest CLI if the installed copy is stale (app upgrade). */
+	guestSync(): Promise<boolean>;
 	guestBootstrap(onProgress: (event: ProgressEvent) => void): Promise<void>;
 	guestAgentInstall(agents: AgentId[], onProgress: (event: ProgressEvent) => void): Promise<void>;
 	removeCoworkDistro(): Promise<void>;
@@ -58,6 +60,10 @@ export const tauriHost: HostClient = {
 	async provisionRun() {
 		const { invoke } = await import('@tauri-apps/api/core');
 		return invoke<ProvisionDto>('provision_run');
+	},
+	async guestSync() {
+		const { invoke } = await import('@tauri-apps/api/core');
+		return invoke<boolean>('guest_sync');
 	},
 	async guestBootstrap(onProgress) {
 		const { invoke, Channel } = await import('@tauri-apps/api/core');

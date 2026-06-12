@@ -40,6 +40,7 @@ pub fn run() {
             setup::preflight_run,
             setup::wsl_enable,
             setup::provision_run,
+            setup::guest_sync,
             setup::guest_bootstrap,
             setup::guest_agent_install,
             setup::remove_cowork_distro,

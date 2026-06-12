@@ -31,6 +31,13 @@ describe('createMockHost', () => {
 		await expect(host.wslEnable(['claude'])).rejects.toEqual(envelope);
 	});
 
+	it('reports guest sync as unchanged by default and rejects scripted failures', async () => {
+		const envelope = { code: 'guest.cli_inject_failed', kind: 'Internal', stage: 'provision' };
+		await expect(createMockHost().guestSync()).resolves.toBe(false);
+		const host = createMockHost({ failWith: { guestSync: envelope } });
+		await expect(host.guestSync()).rejects.toEqual(envelope);
+	});
+
 	it('honors a pending resume state', async () => {
 		const host = createMockHost({
 			resumeLaunch: true,

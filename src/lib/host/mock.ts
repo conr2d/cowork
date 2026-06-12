@@ -119,6 +119,7 @@ export function createMockHost(options: MockHostOptions = {}): HostClient {
 		preflightRun: () => rejectIf('preflightRun', options.preflight ?? PASS_REPORT),
 		wslEnable: () => rejectIf('wslEnable', options.wslEnable ?? 'Ready'),
 		provisionRun: () => rejectIf('provisionRun', options.provision ?? 'Ready'),
+		guestSync: () => rejectIf('guestSync', false),
 		guestBootstrap: (onProgress) =>
 			stream(
 				'guestBootstrap',

@@ -50,7 +50,13 @@
 	});
 
 	onMount(() => {
-		void shell.load();
+		void (async () => {
+			// Upgrade healing: an app upgrade leaves a stale injected guest behind
+			// (missing subcommands, old protocol). Sync before anything probes it.
+			// Best-effort: a failed sync still boots; guest calls surface real errors.
+			await tauriHost.guestSync().catch(() => {});
+			await shell.load();
+		})();
 	});
 
 	function toggleTheme(): void {

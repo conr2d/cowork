@@ -34,7 +34,8 @@
 		detectLinks = false,
 		loginAttempts = 0,
 		theme = undefined,
-		autorun = undefined
+		autorun = undefined,
+		onspawn = undefined
 	}: {
 		distro?: string;
 		workspace?: string;
@@ -43,6 +44,7 @@
 		loginAttempts?: number;
 		theme?: 'light' | 'dark';
 		autorun?: string;
+		onspawn?: (id: number) => void;
 	} = $props();
 
 	let container: HTMLDivElement | undefined = $state();
@@ -133,7 +135,7 @@
 				}
 			};
 
-			const generation = await invoke<number>('pty_spawn', {
+			const sessionId = await invoke<number>('pty_spawn', {
 				onData: channel,
 				distro,
 				workspace,
@@ -141,25 +143,27 @@
 				rows: term.rows,
 				cols: term.cols
 			});
+			onspawn?.(sessionId);
 			term.focus();
 			if (autorun) {
-				await invoke('pty_write', { data: `${autorun}\n` });
+				await invoke('pty_write', { id: sessionId, data: `${autorun}\n` });
 			}
 
 			const dataSub = term.onData((data) => {
-				void invoke('pty_write', { data });
+				void invoke('pty_write', { id: sessionId, data });
 			});
 
 			const observer = new ResizeObserver(() => {
+				if (!container || container.offsetWidth === 0 || container.offsetHeight === 0) return;
 				fit.fit();
-				void invoke('pty_resize', { rows: term.rows, cols: term.cols });
+				void invoke('pty_resize', { id: sessionId, rows: term.rows, cols: term.cols });
 			});
 			observer.observe(container);
 
 			cleanup = () => {
 				dataSub.dispose();
 				observer.disconnect();
-				void invoke('pty_kill', { generation });
+				void invoke('pty_kill', { id: sessionId });
 				term.dispose();
 			};
 		})();

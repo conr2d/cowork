@@ -16,12 +16,21 @@ mod pty;
 mod setup;
 mod workspace;
 
+use tauri::Manager;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .manage(pty::PtyState::default())
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                // Terminals are no longer torn down by frontend navigation; the
+                // window closing is the backstop that kills every wsl.exe child.
+                pty::kill_all(&window.state::<pty::PtyState>());
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             pty::pty_spawn,
             pty::pty_write,

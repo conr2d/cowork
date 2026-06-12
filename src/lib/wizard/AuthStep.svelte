@@ -15,6 +15,7 @@
 	let loginAttempts = $state(0);
 	let finishing = $state(false);
 	let finishFailed = $state(false);
+	let ptyId = $state<number | null>(null);
 </script>
 
 <main class="flex min-h-screen flex-col bg-neutral-50 text-neutral-900">
@@ -27,7 +28,8 @@
 					type="button"
 					class="rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-neutral-50"
 					onclick={() => {
-						void ptyWrite(loginInput(choice.id));
+						if (ptyId === null) return;
+						void ptyWrite(ptyId, loginInput(choice.id));
 						loginAttempts += 1;
 					}}
 				>
@@ -68,6 +70,7 @@
 			{locale}
 			detectLinks
 			{loginAttempts}
+			onspawn={(id) => (ptyId = id)}
 		/>
 	</div>
 </main>

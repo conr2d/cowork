@@ -1,28 +1,23 @@
-//! WP8②: the thin Tauri command/event layer over the cowork-host PTY session.
+//! WP8②: the thin Tauri command/event layer over cowork-host PTY sessions.
 //! All ConPTY spawn/IO/resize/kill logic lives in `cowork_host::pty`; here we
-//! expose it as Tauri commands and pump the PTY's output to xterm.js over an
-//! `ipc::Channel`. No PTY logic lives here — this is glue, compiled and
+//! expose it as Tauri commands and pump PTY output to xterm.js over an
+//! `ipc::Channel`. Sessions live in a keyed registry so terminals persist across
+//! workspace switches; they are killed explicitly or when the window is
+//! destroyed. No PTY logic lives here — this is glue, compiled and
 //! clippy'd on the windows-latest CI host job (src-tauri does not build
 //! off-Windows).
 
 use std::io::Read;
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use base64::Engine;
 use cowork_errors::{Envelope, Stage};
-use cowork_host::pty::{WindowsPtySession, pty_bridge_failed_envelope, terminal_launch};
+use cowork_host::pty::{
+    PtyRegistry, WindowsPtySession, pty_bridge_failed_envelope, terminal_launch,
+};
 use tauri::State;
 use tauri::ipc::Channel;
 
-/// The single embedded-terminal session. `None` until `pty_spawn`; a fresh spawn
-/// kills and replaces any prior session. The generation lets stale frontend
-/// cleanup skip killing a newer session after rapid workspace switches.
-#[derive(Default)]
-pub struct PtyState {
-    session: Mutex<Option<(u64, WindowsPtySession)>>,
-    next_generation: AtomicU64,
-}
+pub type PtyState = PtyRegistry<WindowsPtySession>;
 
 /// The embedded terminal runs in the wizard's agent-login (auth) step.
 const STAGE: Stage = Stage::Auth;
@@ -57,15 +52,7 @@ pub fn pty_spawn(
     // contends on the state mutex.
     std::thread::spawn(move || pump(reader, on_data));
 
-    // Install the new session, killing any prior one (so its wsl.exe child and
-    // its pump thread terminate).
-    let generation = state.next_generation.fetch_add(1, Ordering::Relaxed) + 1;
-    let mut guard = state.session.lock().expect("PtyState mutex poisoned");
-    if let Some((_, mut old)) = guard.take() {
-        let _ = old.kill(STAGE);
-    }
-    *guard = Some((generation, session));
-    Ok(generation)
+    Ok(state.insert(session))
 }
 
 /// Read loop: base64-frame each chunk onto the channel until EOF or the channel
@@ -87,36 +74,52 @@ fn pump(mut reader: Box<dyn Read + Send>, on_data: Channel<String>) {
 
 /// Forward user keystrokes (xterm `onData`, a UTF-8 string) to the PTY.
 #[tauri::command]
-pub fn pty_write(state: State<'_, PtyState>, data: String) -> Result<(), Envelope> {
-    let mut guard = state.session.lock().expect("PtyState mutex poisoned");
-    match guard.as_mut() {
-        Some((_, session)) => session.write_input(data.as_bytes(), STAGE),
+pub fn pty_write(state: State<'_, PtyState>, id: u64, data: String) -> Result<(), Envelope> {
+    match state.get(id) {
+        Some(session) => session
+            .lock()
+            .expect("PtyRegistry session mutex poisoned")
+            .write_input(data.as_bytes(), STAGE),
         None => Ok(()),
     }
 }
 
 /// Resize the ConPTY when xterm reflows (`onResize`).
 #[tauri::command]
-pub fn pty_resize(state: State<'_, PtyState>, rows: u16, cols: u16) -> Result<(), Envelope> {
-    let guard = state.session.lock().expect("PtyState mutex poisoned");
-    match guard.as_ref() {
-        Some((_, session)) => session.resize(rows, cols, STAGE),
+pub fn pty_resize(
+    state: State<'_, PtyState>,
+    id: u64,
+    rows: u16,
+    cols: u16,
+) -> Result<(), Envelope> {
+    match state.get(id) {
+        Some(session) => session
+            .lock()
+            .expect("PtyRegistry session mutex poisoned")
+            .resize(rows, cols, STAGE),
         None => Ok(()),
     }
 }
 
-/// Kill the session (window closing / wizard restart). When a generation is
-/// supplied, stale cleanup from a replaced terminal is a no-op.
+/// Kill the session. Unknown/already-removed ids are a no-op.
 #[tauri::command]
-pub fn pty_kill(state: State<'_, PtyState>, generation: Option<u64>) -> Result<(), Envelope> {
-    let mut guard = state.session.lock().expect("PtyState mutex poisoned");
-    if let (Some(expected), Some((current, _))) = (generation, guard.as_ref()) {
-        if *current != expected {
-            return Ok(());
-        }
-    }
-    match guard.take() {
-        Some((_, mut session)) => session.kill(STAGE),
+pub fn pty_kill(state: State<'_, PtyState>, id: u64) -> Result<(), Envelope> {
+    match state.remove(id) {
+        Some(session) => session
+            .lock()
+            .expect("PtyRegistry session mutex poisoned")
+            .kill(STAGE),
         None => Ok(()),
+    }
+}
+
+/// Kill every live session (window destroyed). Errors are ignored: the children
+/// are being torn down with the app and there is no surface left to report to.
+pub fn kill_all(state: &PtyState) {
+    for session in state.drain() {
+        let _ = session
+            .lock()
+            .expect("PtyRegistry session mutex poisoned")
+            .kill(STAGE);
     }
 }

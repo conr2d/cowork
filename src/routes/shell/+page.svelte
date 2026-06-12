@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 
 	import Terminal from '$lib/components/Terminal.svelte';
 	import type { Envelope } from '$lib/errors/registry';
@@ -10,7 +10,7 @@
 	import ConfirmDeleteDialog from '$lib/shell/ConfirmDeleteDialog.svelte';
 	import NewWorkspaceDialog from '$lib/shell/NewWorkspaceDialog.svelte';
 	import Sidebar from '$lib/shell/Sidebar.svelte';
-	import { agentBinary } from '$lib/shell/model';
+	import { agentBinary, nextOpenSlugs } from '$lib/shell/model';
 	import { loadCollapsed, loadTheme, saveCollapsed, saveTheme } from '$lib/shell/prefs';
 	import { createShell } from '$lib/shell/store.svelte';
 
@@ -22,6 +22,7 @@
 	let renamingSlug = $state<string | null>(null);
 	let deleteTarget = $state<WorkspaceDto | null>(null);
 	let menuFor = $state<{ slug: string; x: number; y: number } | null>(null);
+	let openSlugs = $state<string[]>([]);
 	// Dismissal is by envelope identity, not code — a NEW failure that happens
 	// to carry the same code must resurface the bar.
 	let dismissedError = $state<Envelope | null>(null);
@@ -32,6 +33,16 @@
 			: null
 	);
 	const visibleError = $derived(shell.error !== dismissedError ? shell.error : null);
+
+	$effect(() => {
+		const existing = shell.workspaces.map((workspace) => workspace.slug);
+		const active = shell.activeSlug;
+		openSlugs = nextOpenSlugs(
+			untrack(() => openSlugs),
+			active,
+			existing
+		);
+	});
 
 	onMount(() => {
 		void shell.load();
@@ -144,17 +155,21 @@
 						{m.ws_none_action()}
 					</button>
 				</div>
-			{:else}
-				{#key shell.activeSlug}
-					<Terminal
-						distro="Cowork"
-						workspace={`~/workspaces/${shell.activeSlug}`}
-						locale={getLocale()}
-						{theme}
-						autorun={agentBinary(shell.active.defaultAgent)}
-					/>
-				{/key}
 			{/if}
+			{#each openSlugs as slug (slug)}
+				{@const workspace = shell.workspaces.find((item) => item.slug === slug)}
+				{#if workspace}
+					<div class="term-slot" class:is-active={slug === shell.activeSlug}>
+						<Terminal
+							distro="Cowork"
+							workspace={`~/workspaces/${slug}`}
+							locale={getLocale()}
+							{theme}
+							autorun={agentBinary(workspace.defaultAgent)}
+						/>
+					</div>
+				{/if}
+			{/each}
 		</section>
 	</main>
 
@@ -323,10 +338,19 @@
 		color: var(--ink-soft);
 	}
 	.term {
+		position: relative;
 		flex: 1 1 auto;
 		min-height: 0;
 		background: var(--term-bg);
 		color: var(--term-fg);
+	}
+	.term-slot {
+		position: absolute;
+		inset: 0;
+		visibility: hidden;
+	}
+	.term-slot.is-active {
+		visibility: visible;
 	}
 	.empty {
 		height: 100%;

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { WorkspaceDto } from '$lib/host/types';
-import { agentBinary, brand, initialSlug, pinnedOf, recentOf } from './model';
+import { agentBinary, brand, initialSlug, nextOpenSlugs, pinnedOf, recentOf } from './model';
 
 function workspace(
 	partial: Partial<WorkspaceDto> & Pick<WorkspaceDto, 'name' | 'slug'>
@@ -75,5 +75,27 @@ describe('initialSlug', () => {
 		];
 
 		expect(initialSlug(list)).toBe('pinned-new');
+	});
+});
+
+describe('nextOpenSlugs', () => {
+	it('appends the active slug on first visit', () => {
+		expect(nextOpenSlugs([], 'a', ['a'])).toEqual(['a']);
+	});
+
+	it('does not duplicate an already-open slug and preserves order', () => {
+		expect(nextOpenSlugs(['a', 'b'], 'a', ['a', 'b'])).toEqual(['a', 'b']);
+	});
+
+	it("prunes a deleted workspace's slug", () => {
+		expect(nextOpenSlugs(['a', 'b'], 'a', ['a'])).toEqual(['a']);
+	});
+
+	it('only prunes when active is null', () => {
+		expect(nextOpenSlugs(['a'], null, [])).toEqual([]);
+	});
+
+	it('does not append an active slug missing from existing workspaces', () => {
+		expect(nextOpenSlugs([], 'ghost', ['a'])).toEqual([]);
 	});
 });

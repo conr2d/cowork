@@ -51,6 +51,25 @@ export function initialSlug(list: readonly WorkspaceDto[]): string | null {
 	);
 }
 
+/**
+ * Terminals stay mounted once a workspace has been visited (WP4b): switching
+ * away hides the terminal instead of destroying it, so the agent session
+ * survives. Prune slugs whose workspace no longer exists (delete -> unmount ->
+ * the terminal's own cleanup kills its PTY), then append the active slug on
+ * first visit. Order is mount order; it never reshuffles.
+ */
+export function nextOpenSlugs(
+	open: readonly string[],
+	active: string | null,
+	existing: readonly string[]
+): string[] {
+	const kept = open.filter((slug) => existing.includes(slug));
+	if (active !== null && existing.includes(active) && !kept.includes(active)) {
+		kept.push(active);
+	}
+	return kept;
+}
+
 /** Preset catalog for the create dialog. */
 export const PRESETS: readonly { id: 'blank' | 'pdf' | 'proposal' }[] = [
 	{ id: 'blank' },

@@ -1,16 +1,16 @@
-// A tiny client for writing to the embedded terminal's PTY. The session is
-// spawned by Terminal.svelte; the wizard's auth step uses this to send each
+// A tiny client for writing to keyed embedded-terminal PTY sessions. Sessions
+// are spawned by Terminal.svelte; the wizard's auth step uses this to send each
 // agent's login command. The `@tauri-apps/api` import is dynamic so this module
 // is safe to import from prerendered routes.
 
-/** Send UTF-8 `data` to the embedded terminal's PTY (best-effort). */
-export async function ptyWrite(data: string): Promise<void> {
+/** Send UTF-8 `data` to PTY session `id` (best-effort; unknown id is a no-op). */
+export async function ptyWrite(id: number, data: string): Promise<void> {
 	const { invoke } = await import('@tauri-apps/api/core');
-	await invoke('pty_write', { data });
+	await invoke('pty_write', { id, data });
 }
 
-/** Kill the embedded terminal PTY. A generation token protects newer sessions from stale cleanup. */
-export async function ptyKill(generation?: number): Promise<void> {
+/** Kill PTY session `id`. Unknown/already-killed ids are a no-op. */
+export async function ptyKill(id: number): Promise<void> {
 	const { invoke } = await import('@tauri-apps/api/core');
-	await invoke('pty_kill', { generation });
+	await invoke('pty_kill', { id });
 }

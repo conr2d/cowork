@@ -110,6 +110,8 @@ pub fn create_workspace(
         "create".to_string(),
         "--slug".to_string(),
         slug.clone(),
+        "--preset".to_string(),
+        req.preset.clone(),
     ];
     match ops.run(&extra) {
         RunOutcome::Done { .. } => {}

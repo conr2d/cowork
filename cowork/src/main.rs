@@ -11,6 +11,7 @@
 mod agent;
 mod bootstrap;
 mod cmd;
+mod preset;
 mod sink;
 mod workspace;
 
@@ -88,6 +89,8 @@ enum WorkspaceCmd {
     Create {
         #[arg(long)]
         slug: String,
+        #[arg(long, default_value = "blank")]
+        preset: String,
     },
     /// Remove ~/workspaces/<slug>/ recursively (idempotent).
     Remove {
@@ -179,7 +182,7 @@ fn main() -> ExitCode {
             let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
             let mut sink = StdoutSink;
             let action = match action {
-                WorkspaceCmd::Create { slug } => WorkspaceAction::Create { slug },
+                WorkspaceCmd::Create { slug, preset } => WorkspaceAction::Create { slug, preset },
                 WorkspaceCmd::Remove { slug } => WorkspaceAction::Remove { slug },
             };
             match run_workspace(&action, &home, &mut sink) {

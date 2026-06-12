@@ -159,13 +159,21 @@ fn create_runs_guest_and_appends_metadata() {
     let req = CreateRequest {
         name: "PDF Translate".to_string(),
         default_agent: "codex".to_string(),
-        preset: "blank".to_string(),
+        preset: "pdf".to_string(),
         now_ms: 42,
     };
     let created = create_workspace(&ops, &store, &req).unwrap();
     assert_eq!(
         ops.calls.borrow()[0],
-        ["workspace", "create", "--slug", "pdf-translate"].map(str::to_string)
+        [
+            "workspace",
+            "create",
+            "--slug",
+            "pdf-translate",
+            "--preset",
+            "pdf"
+        ]
+        .map(str::to_string)
     );
     assert_eq!(created.name, "PDF Translate");
     assert_eq!(created.slug, "pdf-translate");
@@ -173,6 +181,7 @@ fn create_runs_guest_and_appends_metadata() {
     assert!(created.sessions.is_empty());
     assert_eq!(created.created_ms, 42);
     assert_eq!(created.last_used_ms, 42);
+    assert_eq!(created.preset, "pdf");
     assert_eq!(store.load().unwrap(), vec![created]);
 }
 

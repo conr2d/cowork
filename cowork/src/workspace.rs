@@ -4,6 +4,8 @@
 
 use std::fs;
 use std::io;
+use std::os::unix::fs::symlink;
+use std::path::Path;
 
 use cowork_errors::protocol::{Message, PROTOCOL_VERSION};
 use cowork_errors::{Code, Envelope, Stage};
@@ -11,7 +13,7 @@ use cowork_errors::{Code, Envelope, Stage};
 use crate::sink::ProgressSink;
 
 pub enum Action {
-    Create { slug: String },
+    Create { slug: String, preset: String },
     Remove { slug: String },
 }
 
@@ -26,7 +28,7 @@ pub fn run_workspace(action: &Action, home: &str, sink: &mut dyn ProgressSink) -
     });
 
     let slug = match action {
-        Action::Create { slug } | Action::Remove { slug } => slug,
+        Action::Create { slug, .. } | Action::Remove { slug } => slug,
     };
     if !valid_slug(slug) {
         sink.emit(&Message::Error {
@@ -36,8 +38,19 @@ pub fn run_workspace(action: &Action, home: &str, sink: &mut dyn ProgressSink) -
         return WorkspaceOutcome::Failed;
     }
 
+    if let Action::Create { preset, .. } = action {
+        if !crate::preset::KNOWN_PRESETS.contains(&preset.as_str()) {
+            let env = Envelope::new(Code::WorkspaceInvalidPreset, Stage::Workspace)
+                .with_context("preset", preset);
+            sink.emit(&Message::Error {
+                envelope: env.clone(),
+            });
+            return WorkspaceOutcome::Failed;
+        }
+    }
+
     let result = match action {
-        Action::Create { slug } => create_workspace(home, slug),
+        Action::Create { slug, preset } => create_workspace(home, slug, preset),
         Action::Remove { slug } => remove_workspace(home, slug),
     };
     if let Err(env) = result {
@@ -62,12 +75,26 @@ pub(crate) fn valid_slug(slug: &str) -> bool {
             .any(|c| c == '/' || c == '\\' || c.is_whitespace())
 }
 
-fn create_workspace(home: &str, slug: &str) -> Result<(), Envelope> {
-    fs::create_dir_all(format!("{home}/workspaces/{slug}/files")).map_err(|e| {
-        Envelope::new(Code::WorkspaceCreateFailed, Stage::Workspace)
-            .with_context("slug", slug)
-            .with_cause(&e.to_string())
-    })
+fn create_workspace(home: &str, slug: &str, preset: &str) -> Result<(), Envelope> {
+    let dir = Path::new(home).join("workspaces").join(slug);
+    fs::create_dir_all(dir.join("files")).map_err(|e| create_failed(slug, e))?;
+
+    if let Some(body) = crate::preset::template(preset) {
+        fs::write(dir.join("AGENTS.md"), body).map_err(|e| create_failed(slug, e))?;
+        match symlink("AGENTS.md", dir.join("CLAUDE.md")) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(create_failed(slug, e)),
+        }
+    }
+
+    Ok(())
+}
+
+fn create_failed(slug: &str, e: io::Error) -> Envelope {
+    Envelope::new(Code::WorkspaceCreateFailed, Stage::Workspace)
+        .with_context("slug", slug)
+        .with_cause(&e.to_string())
 }
 
 fn remove_workspace(home: &str, slug: &str) -> Result<(), Envelope> {
@@ -129,6 +156,7 @@ mod tests {
         let mut sink = CollectingSink::default();
         let action = Action::Create {
             slug: "pdf-translate".to_string(),
+            preset: "blank".to_string(),
         };
         assert!(matches!(
             run_workspace(&action, home.as_str(), &mut sink),
@@ -139,6 +167,105 @@ mod tests {
             run_workspace(&action, home.as_str(), &mut sink),
             WorkspaceOutcome::Done
         ));
+    }
+
+    #[test]
+    fn create_with_pdf_preset_writes_agents_and_claude_symlink() {
+        let home = TempHome::new();
+        let mut sink = CollectingSink::default();
+        let action = Action::Create {
+            slug: "pdf-translate".to_string(),
+            preset: "pdf".to_string(),
+        };
+        assert!(matches!(
+            run_workspace(&action, home.as_str(), &mut sink),
+            WorkspaceOutcome::Done
+        ));
+        assert!(home.path.join("workspaces/pdf-translate/files").is_dir());
+        let agents = fs::read_to_string(home.path.join("workspaces/pdf-translate/AGENTS.md"))
+            .expect("read agents template");
+        assert!(agents.starts_with("# Workspace: Document Translation"));
+        assert_eq!(
+            fs::read_link(home.path.join("workspaces/pdf-translate/CLAUDE.md"))
+                .expect("read claude symlink"),
+            Path::new("AGENTS.md")
+        );
+    }
+
+    #[test]
+    fn create_with_proposal_preset_writes_proposal_template() {
+        let home = TempHome::new();
+        let mut sink = CollectingSink::default();
+        let action = Action::Create {
+            slug: "proposal".to_string(),
+            preset: "proposal".to_string(),
+        };
+        assert!(matches!(
+            run_workspace(&action, home.as_str(), &mut sink),
+            WorkspaceOutcome::Done
+        ));
+        let agents = fs::read_to_string(home.path.join("workspaces/proposal/AGENTS.md"))
+            .expect("read agents template");
+        assert!(agents.starts_with("# Workspace: Proposal Drafting"));
+    }
+
+    #[test]
+    fn create_with_blank_preset_writes_no_instruction_files() {
+        let home = TempHome::new();
+        let mut sink = CollectingSink::default();
+        let action = Action::Create {
+            slug: "blank".to_string(),
+            preset: "blank".to_string(),
+        };
+        assert!(matches!(
+            run_workspace(&action, home.as_str(), &mut sink),
+            WorkspaceOutcome::Done
+        ));
+        assert!(home.path.join("workspaces/blank/files").is_dir());
+        assert!(!home.path.join("workspaces/blank/AGENTS.md").exists());
+        assert!(!home.path.join("workspaces/blank/CLAUDE.md").exists());
+    }
+
+    #[test]
+    fn invalid_preset_fails_before_creating_workspace() {
+        let home = TempHome::new();
+        let mut sink = CollectingSink::default();
+        let action = Action::Create {
+            slug: "bad-preset".to_string(),
+            preset: "garbage".to_string(),
+        };
+        assert!(matches!(
+            run_workspace(&action, home.as_str(), &mut sink),
+            WorkspaceOutcome::Failed
+        ));
+        let Message::Error { envelope } = &sink.messages[1] else {
+            panic!("expected error message");
+        };
+        assert_eq!(envelope.code, Code::WorkspaceInvalidPreset);
+        assert!(!home.path.join("workspaces/bad-preset").exists());
+    }
+
+    #[test]
+    fn create_with_pdf_preset_is_idempotent_when_symlink_exists() {
+        let home = TempHome::new();
+        let mut sink = CollectingSink::default();
+        let action = Action::Create {
+            slug: "pdf-translate".to_string(),
+            preset: "pdf".to_string(),
+        };
+        assert!(matches!(
+            run_workspace(&action, home.as_str(), &mut sink),
+            WorkspaceOutcome::Done
+        ));
+        assert!(matches!(
+            run_workspace(&action, home.as_str(), &mut sink),
+            WorkspaceOutcome::Done
+        ));
+        assert_eq!(
+            fs::read_link(home.path.join("workspaces/pdf-translate/CLAUDE.md"))
+                .expect("read claude symlink"),
+            Path::new("AGENTS.md")
+        );
     }
 
     #[test]
@@ -178,6 +305,7 @@ mod tests {
             let mut sink = CollectingSink::default();
             let action = Action::Create {
                 slug: slug.to_string(),
+                preset: "blank".to_string(),
             };
             assert!(matches!(
                 run_workspace(&action, home.as_str(), &mut sink),
@@ -196,6 +324,7 @@ mod tests {
         let mut sink = CollectingSink::default();
         let action = Action::Create {
             slug: "ok".to_string(),
+            preset: "blank".to_string(),
         };
         assert!(matches!(
             run_workspace(&action, home.as_str(), &mut sink),

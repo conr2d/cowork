@@ -35,7 +35,9 @@
 		loginAttempts = 0,
 		theme = undefined,
 		autorun = undefined,
-		onspawn = undefined
+		onspawn = undefined,
+		active = false,
+		onactivity = undefined
 	}: {
 		distro?: string;
 		workspace?: string;
@@ -45,6 +47,8 @@
 		theme?: 'light' | 'dark';
 		autorun?: string;
 		onspawn?: (id: number) => void;
+		active?: boolean;
+		onactivity?: (event: 'output' | 'exit') => void;
 	} = $props();
 
 	let container: HTMLDivElement | undefined = $state();
@@ -124,8 +128,14 @@
 			const decoder = new TextDecoder();
 			const channel = new Channel<string>();
 			channel.onmessage = (chunk) => {
+				if (chunk === '') {
+					// Host EOF sentinel: the PTY child exited.
+					onactivity?.('exit');
+					return;
+				}
 				const bytes = base64ToBytes(chunk);
 				term.write(bytes);
+				onactivity?.('output');
 				// Only scan once a login has been triggered — otherwise the shell's
 				// startup banner (e.g. the Ubuntu MOTD URL) would surface the button
 				// before the user has started signing in.
@@ -173,6 +183,11 @@
 	// paste (e.g. an auth code) without having to click into the terminal first.
 	$effect(() => {
 		if (loginAttempts > 0) termRef?.focus();
+	});
+
+	// Focus when this terminal's tab becomes the active one.
+	$effect(() => {
+		if (active) termRef?.focus();
 	});
 
 	$effect(() => {

@@ -86,6 +86,8 @@ pub struct WorkspacePatch {
     pub last_used_ms: Option<u64>,
     pub default_agent: Option<String>,
     pub preset: Option<String>,
+    /// Whole-array replace; the frontend owns tab order/titles. None = leave as is.
+    pub sessions: Option<Vec<SessionMeta>>,
 }
 
 pub struct CreateRequest {
@@ -169,6 +171,9 @@ pub fn update_workspace(
     }
     if let Some(preset) = &patch.preset {
         meta.preset = preset.clone();
+    }
+    if let Some(sessions) = &patch.sessions {
+        meta.sessions = sessions.clone();
     }
     let updated = meta.clone();
     store.save(&all)?;

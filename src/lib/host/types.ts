@@ -78,6 +78,7 @@ export interface WorkspacePatch {
 	lastUsedMs?: number;
 	defaultAgent?: AgentId;
 	preset?: string;
+	sessions?: SessionDto[];
 }
 
 /** `verify_agent_auth` result (serde external enum → bare PascalCase strings). */

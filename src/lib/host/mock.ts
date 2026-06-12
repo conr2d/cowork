@@ -185,6 +185,9 @@ export function createMockHost(options: MockHostOptions = {}): HostClient {
 			if (patch.lastUsedMs !== undefined) workspace.lastUsedMs = patch.lastUsedMs;
 			if (patch.defaultAgent !== undefined) workspace.defaultAgent = patch.defaultAgent;
 			if (patch.preset !== undefined) workspace.preset = patch.preset;
+			if (patch.sessions !== undefined) {
+				workspace.sessions = patch.sessions.map((session) => ({ ...session }));
+			}
 			return { ...workspace };
 		},
 		workspaceDelete: async (slug: string) => {

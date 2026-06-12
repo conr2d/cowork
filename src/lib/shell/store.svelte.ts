@@ -1,6 +1,6 @@
 import type { Envelope } from '$lib/errors/registry';
 import { asEnvelope, type HostClient } from '$lib/host/client';
-import type { WorkspaceDto } from '$lib/host/types';
+import type { SessionDto, WorkspaceDto } from '$lib/host/types';
 import type { AgentId } from '$lib/terminal/login';
 import { initialSlug, pinnedOf, recentOf } from './model';
 
@@ -20,6 +20,8 @@ export interface Shell {
 	openFiles(slug: string): Promise<void>;
 	setPinned(slug: string, pinned: boolean): Promise<void>;
 	reorderPinned(slugs: readonly string[]): Promise<void>;
+	updateSessions(slug: string, sessions: SessionDto[]): Promise<void>;
+	setDefaultAgent(slug: string, agent: AgentId): Promise<void>;
 }
 
 export function createShell(host: HostClient): Shell {
@@ -151,6 +153,22 @@ export function createShell(host: HostClient): Shell {
 				for (const [index, slug] of slugs.entries()) {
 					await patchWorkspace(slug, { pinOrder: index });
 				}
+				error = null;
+			} catch (caught) {
+				error = asEnvelope(caught);
+			}
+		},
+		async updateSessions(slug, sessions) {
+			try {
+				await patchWorkspace(slug, { sessions });
+				error = null;
+			} catch (caught) {
+				error = asEnvelope(caught);
+			}
+		},
+		async setDefaultAgent(slug, agent) {
+			try {
+				await patchWorkspace(slug, { defaultAgent: agent });
 				error = null;
 			} catch (caught) {
 				error = asEnvelope(caught);

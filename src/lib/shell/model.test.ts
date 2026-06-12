@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
-import type { WorkspaceDto } from '$lib/host/types';
-import { agentBinary, brand, initialSlug, nextOpenSlugs, pinnedOf, recentOf } from './model';
+import type { SessionDto, WorkspaceDto } from '$lib/host/types';
+import {
+	agentBinary,
+	brand,
+	initialSlug,
+	nextSessionOrder,
+	nextSessionTitle,
+	pinnedOf,
+	pruneOpen,
+	recentOf,
+	sessionLaunch,
+	sortedSessions
+} from './model';
 
 function workspace(
 	partial: Partial<WorkspaceDto> & Pick<WorkspaceDto, 'name' | 'slug'>
@@ -17,6 +28,10 @@ function workspace(
 		preset: partial.preset ?? 'blank',
 		sessions: partial.sessions ?? []
 	};
+}
+
+function session(partial: Partial<SessionDto> & Pick<SessionDto, 'id'>): SessionDto {
+	return { agent: 'claude', agentSessionUuid: null, title: 't', order: 0, ...partial };
 }
 
 describe('brand', () => {
@@ -78,24 +93,86 @@ describe('initialSlug', () => {
 	});
 });
 
-describe('nextOpenSlugs', () => {
-	it('appends the active slug on first visit', () => {
-		expect(nextOpenSlugs([], 'a', ['a'])).toEqual(['a']);
+describe('sortedSessions', () => {
+	it('returns sessions ordered by order ascending', () => {
+		const sessions = [
+			session({ id: 'third', order: 3 }),
+			session({ id: 'first', order: 1 }),
+			session({ id: 'second', order: 2 })
+		];
+
+		expect(sortedSessions(sessions).map((item) => item.id)).toEqual(['first', 'second', 'third']);
+	});
+});
+
+describe('nextSessionOrder', () => {
+	it('returns 0 for an empty list', () => {
+		expect(nextSessionOrder([])).toBe(0);
 	});
 
-	it('does not duplicate an already-open slug and preserves order', () => {
-		expect(nextOpenSlugs(['a', 'b'], 'a', ['a', 'b'])).toEqual(['a', 'b']);
+	it('returns max order plus one', () => {
+		expect(nextSessionOrder([session({ id: 'a', order: 0 }), session({ id: 'b', order: 2 })])).toBe(
+			3
+		);
+	});
+});
+
+describe('nextSessionTitle', () => {
+	it('returns Claude 1 when there are no sessions', () => {
+		expect(nextSessionTitle([], 'claude')).toBe('Claude 1');
 	});
 
-	it("prunes a deleted workspace's slug", () => {
-		expect(nextOpenSlugs(['a', 'b'], 'a', ['a'])).toEqual(['a']);
+	it('counts existing sessions for the same agent', () => {
+		expect(nextSessionTitle([session({ id: 'c1', agent: 'codex' })], 'codex')).toBe('ChatGPT 2');
 	});
 
-	it('only prunes when active is null', () => {
-		expect(nextOpenSlugs(['a'], null, [])).toEqual([]);
+	it('ignores other agents when numbering', () => {
+		expect(nextSessionTitle([session({ id: 's1', agent: 'claude' })], 'antigravity')).toBe(
+			'Gemini 1'
+		);
+	});
+});
+
+describe('sessionLaunch', () => {
+	it('launches fresh claude sessions with a fixed session id', () => {
+		expect(sessionLaunch('claude', 'u1', false)).toBe('claude --session-id u1');
 	});
 
-	it('does not append an active slug missing from existing workspaces', () => {
-		expect(nextOpenSlugs([], 'ghost', ['a'])).toEqual([]);
+	it('resumes restored claude sessions', () => {
+		expect(sessionLaunch('claude', 'u1', true)).toBe('claude --resume u1');
+	});
+
+	it('launches bare claude when no uuid exists', () => {
+		expect(sessionLaunch('claude', null, true)).toBe('claude');
+	});
+
+	it('launches bare codex until WP4d captures uuid', () => {
+		expect(sessionLaunch('codex', 'u1', false)).toBe('codex');
+	});
+
+	it('launches bare antigravity until WP4d captures uuid', () => {
+		expect(sessionLaunch('antigravity', null, false)).toBe('agy');
+	});
+});
+
+describe('pruneOpen', () => {
+	it('keeps a ref whose workspace and session exist', () => {
+		const workspaces = [workspace({ name: 'A', slug: 'a', sessions: [session({ id: 's1' })] })];
+
+		expect(pruneOpen([{ slug: 'a', sessionId: 's1' }], workspaces)).toEqual([
+			{ slug: 'a', sessionId: 's1' }
+		]);
+	});
+
+	it('drops a ref whose session was removed from its workspace', () => {
+		const workspaces = [workspace({ name: 'A', slug: 'a', sessions: [session({ id: 's2' })] })];
+
+		expect(pruneOpen([{ slug: 'a', sessionId: 's1' }], workspaces)).toEqual([]);
+	});
+
+	it('drops a ref whose workspace is gone', () => {
+		const workspaces = [workspace({ name: 'A', slug: 'a', sessions: [session({ id: 's1' })] })];
+
+		expect(pruneOpen([{ slug: 'b', sessionId: 's1' }], workspaces)).toEqual([]);
 	});
 });

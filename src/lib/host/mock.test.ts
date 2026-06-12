@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createMockHost } from './mock';
-import type { ProgressEvent } from './types';
+import type { ProgressEvent, SessionDto } from './types';
 
 describe('createMockHost', () => {
 	it('returns a passing preflight report by default', async () => {
@@ -81,6 +81,23 @@ describe('createMockHost', () => {
 		await expect(host.workspaceUpdate('missing', { name: 'Nope' })).rejects.toMatchObject({
 			code: 'workspace.not_found'
 		});
+	});
+
+	it('replaces workspace sessions wholesale and preserves them when omitted', async () => {
+		const host = createMockHost();
+		const sessions: SessionDto[] = [
+			{
+				id: 's1',
+				agent: 'claude',
+				agentSessionUuid: 'u1',
+				title: 'Claude 1',
+				order: 0
+			}
+		];
+		const updated = await host.workspaceUpdate('default', { sessions });
+		expect(updated.sessions).toEqual(sessions);
+		const renamed = await host.workspaceUpdate('default', { name: 'Renamed' });
+		expect(renamed.sessions).toEqual(sessions);
 	});
 
 	it('deletes workspaces idempotently', async () => {

@@ -10,11 +10,14 @@
 	import ConfirmDeleteDialog from '$lib/shell/ConfirmDeleteDialog.svelte';
 	import NewWorkspaceDialog from '$lib/shell/NewWorkspaceDialog.svelte';
 	import Sidebar from '$lib/shell/Sidebar.svelte';
-	import { agentBinary, nextOpenSlugs } from '$lib/shell/model';
+	import TabStrip from '$lib/shell/TabStrip.svelte';
+	import { sessionLaunch, sortedSessions } from '$lib/shell/model';
 	import { loadCollapsed, loadTheme, saveCollapsed, saveTheme } from '$lib/shell/prefs';
+	import { createSessionManager } from '$lib/shell/sessions.svelte';
 	import { createShell } from '$lib/shell/store.svelte';
 
 	const shell = createShell(tauriHost);
+	const manager = createSessionManager(shell);
 
 	let theme = $state(loadTheme());
 	let collapsed = $state(loadCollapsed());
@@ -22,7 +25,6 @@
 	let renamingSlug = $state<string | null>(null);
 	let deleteTarget = $state<WorkspaceDto | null>(null);
 	let menuFor = $state<{ slug: string; x: number; y: number } | null>(null);
-	let openSlugs = $state<string[]>([]);
 	// Dismissal is by envelope identity, not code — a NEW failure that happens
 	// to carry the same code must resurface the bar.
 	let dismissedError = $state<Envelope | null>(null);
@@ -34,14 +36,17 @@
 	);
 	const visibleError = $derived(shell.error !== dismissedError ? shell.error : null);
 
+	// Workspace activation drives the tab lifecycle; untrack the manager call so
+	// this effect only depends on the active workspace itself.
 	$effect(() => {
-		const existing = shell.workspaces.map((workspace) => workspace.slug);
-		const active = shell.activeSlug;
-		openSlugs = nextOpenSlugs(
-			untrack(() => openSlugs),
-			active,
-			existing
-		);
+		const workspace = shell.active;
+		if (workspace) untrack(() => void manager.ensureActive(workspace));
+	});
+
+	// Deleted workspaces / closed sessions unmount their terminals (which kills
+	// the PTYs). prune() untracks its own state internally.
+	$effect(() => {
+		manager.prune(shell.workspaces);
 	});
 
 	onMount(() => {
@@ -133,6 +138,35 @@
 			</button>
 		</div>
 
+		{#if shell.active}
+			<TabStrip
+				workspace={shell.active}
+				tabs={sortedSessions(shell.active.sessions)}
+				activeId={manager.activeOf(shell.active.slug)}
+				statuses={manager.statuses}
+				oncreate={(agent) => {
+					if (shell.active) void manager.create(shell.active, agent);
+				}}
+				onactivate={(id) => {
+					if (shell.active) manager.activate(shell.active, id);
+				}}
+				onclose={(id) => {
+					if (shell.active) void manager.close(shell.active, id);
+				}}
+			/>
+		{/if}
+
+		{#if manager.advisorySlug !== null}
+			<div class="advisorybar">
+				<span>{m.session_advisory()}</span>
+				<button
+					type="button"
+					aria-label={m.action_cancel()}
+					onclick={() => manager.dismissAdvisory()}>×</button
+				>
+			</div>
+		{/if}
+
 		{#if visibleError}
 			<div class="errorbar">
 				<span>{m.error_title()}</span>
@@ -156,16 +190,26 @@
 					</button>
 				</div>
 			{/if}
-			{#each openSlugs as slug (slug)}
-				{@const workspace = shell.workspaces.find((item) => item.slug === slug)}
-				{#if workspace}
-					<div class="term-slot" class:is-active={slug === shell.activeSlug}>
+			{#each manager.open as ref (ref.sessionId)}
+				{@const workspace = shell.workspaces.find((item) => item.slug === ref.slug)}
+				{@const session = workspace?.sessions.find((item) => item.id === ref.sessionId)}
+				{#if workspace && session}
+					{@const isActive =
+						ref.slug === shell.activeSlug && manager.activeOf(ref.slug) === session.id}
+					<div class="term-slot" class:is-active={isActive}>
 						<Terminal
 							distro="Cowork"
-							workspace={`~/workspaces/${slug}`}
+							workspace={`~/workspaces/${ref.slug}`}
 							locale={getLocale()}
 							{theme}
-							autorun={agentBinary(workspace.defaultAgent)}
+							active={isActive}
+							autorun={sessionLaunch(
+								session.agent,
+								session.agentSessionUuid ?? null,
+								manager.isRestore(session.id)
+							)}
+							onactivity={(event) => manager.noteActivity(session.id, event)}
+							onspawn={() => manager.noteSpawn(session.id)}
 						/>
 					</div>
 				{/if}
@@ -332,6 +376,23 @@
 		color: var(--accent);
 	}
 	.errorbar button {
+		margin-left: auto;
+		font-size: 16px;
+		line-height: 1;
+		color: var(--ink-soft);
+	}
+	.advisorybar {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		min-height: 30px;
+		padding: 5px 18px;
+		border-bottom: 1px solid var(--line);
+		background: var(--paper-2);
+		color: var(--ink-soft);
+		font-size: 12px;
+	}
+	.advisorybar button {
 		margin-left: auto;
 		font-size: 16px;
 		line-height: 1;

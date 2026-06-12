@@ -1,4 +1,4 @@
-import type { WorkspaceDto } from '$lib/host/types';
+import type { SessionDto, WorkspaceDto } from '$lib/host/types';
 import type { AgentId } from '$lib/terminal/login';
 
 /** Product brand shown in chrome (non-devs know these, not CLI names). */
@@ -51,23 +51,61 @@ export function initialSlug(list: readonly WorkspaceDto[]): string | null {
 	);
 }
 
+/** One mounted terminal: a session of a workspace. */
+export interface SessionRef {
+	slug: string;
+	sessionId: string;
+}
+
+/** Tab status: cold = not spawned this app run; done = its PTY exited. */
+export type SessionStatus = 'cold' | 'working' | 'idle' | 'done';
+
+/** Tabs render in stored order (stable, frontend-owned). */
+export function sortedSessions(sessions: readonly SessionDto[]): SessionDto[] {
+	return sessions.toSorted((a, b) => a.order - b.order);
+}
+
+/** Next order value: max existing + 1 (0 for the first session). */
+export function nextSessionOrder(sessions: readonly SessionDto[]): number {
+	return Math.max(-1, ...sessions.map((session) => session.order)) + 1;
+}
+
+/** Default tab title: brand + per-agent ordinal ("Claude 2", "ChatGPT 1"). */
+export function nextSessionTitle(sessions: readonly SessionDto[], agent: AgentId): string {
+	const count = sessions.filter((session) => session.agent === agent).length;
+	return `${brand(agent)} ${count + 1}`;
+}
+
 /**
- * Terminals stay mounted once a workspace has been visited (WP4b): switching
- * away hides the terminal instead of destroying it, so the agent session
- * survives. Prune slugs whose workspace no longer exists (delete -> unmount ->
- * the terminal's own cleanup kills its PTY), then append the active slug on
- * first visit. Order is mount order; it never reshuffles.
+ * The command autorun at PTY spawn for a session. claude rides its own resume:
+ * fresh sessions pin a host-generated UUID (--session-id) so a later restore
+ * can --resume the conversation; codex/antigravity UUID capture is WP4d, so
+ * they spawn bare for now. A restored claude session that never materialized a
+ * conversation (no first message) will print claude's own "not found" error —
+ * accepted; the user opens a new tab.
  */
-export function nextOpenSlugs(
-	open: readonly string[],
-	active: string | null,
-	existing: readonly string[]
-): string[] {
-	const kept = open.filter((slug) => existing.includes(slug));
-	if (active !== null && existing.includes(active) && !kept.includes(active)) {
-		kept.push(active);
-	}
-	return kept;
+export function sessionLaunch(agent: AgentId, uuid: string | null, restore: boolean): string {
+	if (agent !== 'claude' || uuid === null) return agentBinary(agent);
+	return restore ? `claude --resume ${uuid}` : `claude --session-id ${uuid}`;
+}
+
+/**
+ * Mounted terminals survive workspace switches (WP4b); this prunes refs whose
+ * session or whole workspace no longer exists (close/delete → unmount → the
+ * terminal's own cleanup kills its PTY). Appending is the session manager's
+ * job. Order is mount order; it never reshuffles.
+ */
+export function pruneOpen(
+	open: readonly SessionRef[],
+	workspaces: readonly WorkspaceDto[]
+): SessionRef[] {
+	return open.filter((ref) =>
+		workspaces.some(
+			(workspace) =>
+				workspace.slug === ref.slug &&
+				workspace.sessions.some((session) => session.id === ref.sessionId)
+		)
+	);
 }
 
 /** Preset catalog for the create dialog. */

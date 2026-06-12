@@ -276,6 +276,7 @@ fn update_applies_patch_and_keeps_slug() {
             last_used_ms: Some(99),
             default_agent: Some("codex".to_string()),
             preset: Some("repo".to_string()),
+            sessions: None,
         },
     )
     .unwrap();
@@ -283,6 +284,70 @@ fn update_applies_patch_and_keeps_slug() {
     assert_eq!(updated.slug, "default");
     assert_eq!(updated.pin_order, Some(3));
     assert_eq!(updated.last_used_ms, 99);
+}
+
+#[test]
+fn update_replaces_sessions_wholesale() {
+    let temp = TempDir::new();
+    let store = store(temp.path.join("workspaces.json"));
+    store.save(&[meta("default")]).unwrap();
+
+    let updated = update_workspace(
+        &store,
+        "default",
+        &WorkspacePatch {
+            sessions: Some(vec![SessionMeta {
+                id: "s1".into(),
+                agent: "claude".into(),
+                agent_session_uuid: Some("u1".into()),
+                title: "Claude 1".into(),
+                order: 0,
+            }]),
+            ..WorkspacePatch::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(updated.sessions.len(), 1);
+    assert_eq!(updated.sessions[0].id, "s1");
+    assert_eq!(updated.sessions[0].agent, "claude");
+    assert_eq!(
+        updated.sessions[0].agent_session_uuid.as_deref(),
+        Some("u1")
+    );
+    assert_eq!(updated.sessions[0].title, "Claude 1");
+    assert_eq!(updated.sessions[0].order, 0);
+
+    let updated = update_workspace(
+        &store,
+        "default",
+        &WorkspacePatch {
+            sessions: Some(vec![]),
+            ..WorkspacePatch::default()
+        },
+    )
+    .unwrap();
+    assert!(updated.sessions.is_empty());
+
+    let updated = update_workspace(
+        &store,
+        "default",
+        &WorkspacePatch {
+            sessions: Some(vec![SessionMeta {
+                id: "s2".into(),
+                agent: "codex".into(),
+                agent_session_uuid: None,
+                title: "ChatGPT 1".into(),
+                order: 0,
+            }]),
+            ..WorkspacePatch::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(updated.sessions[0].id, "s2");
+
+    let updated = update_workspace(&store, "default", &WorkspacePatch::default()).unwrap();
+    assert_eq!(updated.sessions.len(), 1);
+    assert_eq!(updated.sessions[0].id, "s2");
 }
 
 #[test]

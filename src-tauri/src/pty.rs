@@ -70,6 +70,10 @@ fn pump(mut reader: Box<dyn Read + Send>, on_data: Channel<String>) {
             }
         }
     }
+    // EOF or read failure: the child is gone. An empty chunk can never come from
+    // a real read (n > 0 always), so it doubles as the exit sentinel the
+    // frontend's status glyphs key off.
+    let _ = on_data.send(String::new());
 }
 
 /// Forward user keystrokes (xterm `onData`, a UTF-8 string) to the PTY.

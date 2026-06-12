@@ -38,6 +38,7 @@
 	"auth_login": "{agent} にログイン",
 	"auth_open_login": "サインインページを開く",
 	"auth_finish": "Cowork を開く",
+	"auth_waiting": "サインインの完了を待っています…",
 	"shell_new_workspace": "新しいワークスペース",
 	"shell_pinned": "ピン留め",
 	"shell_recent": "最近",

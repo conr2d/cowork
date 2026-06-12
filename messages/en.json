@@ -39,6 +39,7 @@
 	"auth_login": "Log in to {agent}",
 	"auth_open_login": "Open sign-in page",
 	"auth_finish": "Open Cowork",
+	"auth_waiting": "Waiting for sign-in to complete…",
 	"shell_new_workspace": "New workspace",
 	"shell_pinned": "Pinned",
 	"shell_recent": "Recent",

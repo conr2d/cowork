@@ -38,6 +38,7 @@
 	"auth_login": "{agent} 로그인",
 	"auth_open_login": "로그인 페이지 열기",
 	"auth_finish": "Cowork 열기",
+	"auth_waiting": "로그인 완료를 기다리는 중…",
 	"shell_new_workspace": "새 워크스페이스",
 	"shell_pinned": "고정됨",
 	"shell_recent": "최근",

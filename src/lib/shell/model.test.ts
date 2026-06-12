@@ -10,6 +10,7 @@ import {
 	pinnedOf,
 	pruneOpen,
 	recentOf,
+	sessionAutorun,
 	sessionLaunch,
 	sortedSessions
 } from './model';
@@ -164,6 +165,22 @@ describe('sessionLaunch', () => {
 
 	it('launches fresh antigravity sessions bare when no uuid exists', () => {
 		expect(sessionLaunch('antigravity', null, false)).toBe('agy');
+	});
+});
+
+describe('sessionAutorun', () => {
+	it('chains claude login before a fresh fixed-session launch when login is needed', () => {
+		expect(sessionAutorun('claude', 'u1', false, true)).toBe(
+			'claude auth login && claude --session-id u1'
+		);
+	});
+
+	it('chains codex login before a restored resume when login is needed', () => {
+		expect(sessionAutorun('codex', 'u1', true, true)).toBe('codex login && codex resume u1');
+	});
+
+	it('passes through the launch command when login is not needed', () => {
+		expect(sessionAutorun('codex', null, false, false)).toBe('codex');
 	});
 });
 

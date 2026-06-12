@@ -5,6 +5,7 @@
 import type { AgentId } from '$lib/terminal/login';
 import type { HostClient } from './client';
 import type {
+	AgentAuthStatusDto,
 	PreflightReport,
 	ProgressEvent,
 	ProvisionDto,
@@ -23,6 +24,8 @@ export interface MockHostOptions {
 	resumeLaunch?: boolean;
 	resumeState?: ResumeDto | null;
 	setupComplete?: boolean;
+	/** Scripted auth-probe results; unspecified agents report 'Valid'. */
+	agentAuth?: Partial<Record<AgentId, AgentAuthStatusDto>>;
 	/** If set, the named method rejects with this value (an Envelope). */
 	failWith?: Partial<Record<keyof HostClient, unknown>>;
 }
@@ -201,6 +204,8 @@ export function createMockHost(options: MockHostOptions = {}): HostClient {
 			if (!workspaces.some((workspace) => workspace.slug === slug)) {
 				return Promise.reject(workspaceEnvelope('workspace.not_found', 'Internal', { slug }));
 			}
-		}
+		},
+		verifyAgentAuth: (agent: AgentId) =>
+			rejectIf('verifyAgentAuth', options.agentAuth?.[agent] ?? 'Valid')
 	};
 }

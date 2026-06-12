@@ -12,7 +12,7 @@ use std::process::{Command, Stdio};
 use cowork_errors::{Envelope, Stage};
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
-use crate::protocol::StreamParser;
+use crate::protocol::{HostEvent, StreamParser};
 
 use super::inject::{
     RunOutcome, chmod_args, classify_run, cli_inject_failed_envelope, cli_launch_failed_envelope,
@@ -85,6 +85,20 @@ pub fn run_guest(
     extra: &[String],
     on_progress: &mut dyn FnMut(Stage, &str),
 ) -> RunOutcome {
+    match run_guest_events(stage, extra, on_progress) {
+        Err(env) => RunOutcome::LaunchFailed(env),
+        Ok((events, exit_code)) => classify_run(&events, exit_code, stage),
+    }
+}
+
+/// Run the injected guest with `extra` args; stream stdout through the parser
+/// (stamped `stage`), forward `Progress` to `on_progress`, and return ALL parsed
+/// events plus the exit code. `Err` = the process could not be launched.
+pub fn run_guest_events(
+    stage: Stage,
+    extra: &[String],
+    on_progress: &mut dyn FnMut(Stage, &str),
+) -> Result<(Vec<HostEvent>, i32), Envelope> {
     let mut child = match Command::new("wsl.exe")
         .creation_flags(CREATE_NO_WINDOW)
         .args(launch_args(extra))
@@ -93,7 +107,7 @@ pub fn run_guest(
         .spawn()
     {
         Ok(c) => c,
-        Err(e) => return RunOutcome::LaunchFailed(cli_launch_failed_envelope(&e.to_string())),
+        Err(e) => return Err(cli_launch_failed_envelope(&e.to_string())),
     };
 
     let mut events = Vec::new();
@@ -114,5 +128,5 @@ pub fn run_guest(
         Ok(status) => status.code().unwrap_or(-1),
         Err(_) => -1,
     };
-    classify_run(&events, exit_code, stage)
+    Ok((events, exit_code))
 }

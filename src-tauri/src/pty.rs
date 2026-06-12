@@ -6,14 +6,14 @@
 //! off-Windows).
 
 use std::io::Read;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use base64::Engine;
 use cowork_errors::{Envelope, Stage};
-use cowork_host::pty::{pty_bridge_failed_envelope, terminal_launch, WindowsPtySession};
-use tauri::ipc::Channel;
+use cowork_host::pty::{WindowsPtySession, pty_bridge_failed_envelope, terminal_launch};
 use tauri::State;
+use tauri::ipc::Channel;
 
 /// The single embedded-terminal session. `None` until `pty_spawn`; a fresh spawn
 /// kills and replaces any prior session. The generation lets stale frontend

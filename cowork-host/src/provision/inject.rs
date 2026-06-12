@@ -183,7 +183,8 @@ pub fn classify_run(events: &[HostEvent], exit_code: i32, default_stage: Stage) 
         .find_map(|ev| match ev {
             HostEvent::Progress { stage, .. } => Some(*stage),
             HostEvent::Done { stage } => Some(*stage),
-            _ => None,
+            HostEvent::AuthStatus { .. } => None,
+            HostEvent::GuestError(_) | HostEvent::ProtocolError(_) => None,
         })
         .unwrap_or(default_stage);
     RunOutcome::Crashed(cli_crashed_envelope(exit_code, last_stage))

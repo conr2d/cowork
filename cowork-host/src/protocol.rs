@@ -7,7 +7,7 @@
 //! fully unit-testable off-Windows.
 
 use cowork_errors::protocol::{
-    Message, PROTOCOL_VERSION, parse_error_envelope, version_mismatch_envelope,
+    AgentAuthStatus, Message, PROTOCOL_VERSION, parse_error_envelope, version_mismatch_envelope,
 };
 use cowork_errors::{Envelope, Stage};
 
@@ -25,6 +25,11 @@ pub enum HostEvent {
     GuestError(Envelope),
     /// The guest reported `stage` complete.
     Done { stage: Stage },
+    /// The guest reported an agent auth-status probe result (v0.2 WP4).
+    AuthStatus {
+        agent: String,
+        status: AgentAuthStatus,
+    },
     /// The host detected a protocol fault (`protocol.version_mismatch` or
     /// `protocol.parse_error`) while reading the stream.
     ProtocolError(Envelope),
@@ -73,6 +78,9 @@ impl StreamParser {
             Ok(Message::Progress { stage, step }) => Some(HostEvent::Progress { stage, step }),
             Ok(Message::Error { envelope }) => Some(HostEvent::GuestError(envelope)),
             Ok(Message::Done { stage }) => Some(HostEvent::Done { stage }),
+            Ok(Message::AuthStatus { agent, status }) => {
+                Some(HostEvent::AuthStatus { agent, status })
+            }
             Err(_) => Some(HostEvent::ProtocolError(parse_error_envelope(
                 self.stage, trimmed,
             ))),

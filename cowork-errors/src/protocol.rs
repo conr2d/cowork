@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::{Code, Envelope, Stage};
 
 /// Wire protocol version. Bump on ANY change to [`Message`]'s shape.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// One line of the guest→host stream. Internally tagged by `type`.
 ///
@@ -34,6 +34,23 @@ pub enum Message {
     Error { envelope: Envelope },
     /// The guest finished the work for `stage` successfully.
     Done { stage: Stage },
+    /// Result of an `auth-status` probe (v0.2 WP4) for `agent`
+    /// (canonical lowercase id: "claude" | "codex" | "antigravity").
+    AuthStatus {
+        agent: String,
+        status: AgentAuthStatus,
+    },
+}
+
+/// Result of an agent auth-status probe (v0.2 WP4). `Valid`/`Missing` reflect
+/// *local* credential validity (presence + not expired) — server-side revocation
+/// is not detectable here and is absorbed by lazy re-auth on first agent call.
+/// `Unknown` = the agent has no local probe (antigravity).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AgentAuthStatus {
+    Valid,
+    Missing,
+    Unknown,
 }
 
 /// `protocol.version_mismatch` (Internal) — the guest's declared protocol

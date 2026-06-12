@@ -6,6 +6,7 @@
 import type { AgentId } from '$lib/terminal/login';
 import type { Envelope } from '$lib/errors/registry';
 import type {
+	AgentAuthStatusDto,
 	PreflightReport,
 	ProgressEvent,
 	ProvisionDto,
@@ -34,6 +35,7 @@ export interface HostClient {
 	workspaceDelete(slug: string): Promise<void>;
 	workspaceSlugPreview(name: string): Promise<string>;
 	workspaceOpenFiles(slug: string): Promise<void>;
+	verifyAgentAuth(agent: AgentId): Promise<AgentAuthStatusDto>;
 }
 
 /** A Tauri command rejection is the serialized backend `Envelope`. */
@@ -114,5 +116,9 @@ export const tauriHost: HostClient = {
 	async workspaceOpenFiles(slug) {
 		const { invoke } = await import('@tauri-apps/api/core');
 		await invoke('workspace_open_files', { slug });
+	},
+	async verifyAgentAuth(agent) {
+		const { invoke } = await import('@tauri-apps/api/core');
+		return invoke<AgentAuthStatusDto>('verify_agent_auth', { agent });
 	}
 };

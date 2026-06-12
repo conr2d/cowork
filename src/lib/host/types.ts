@@ -80,6 +80,9 @@ export interface WorkspacePatch {
 	preset?: string;
 }
 
+/** `verify_agent_auth` result (serde external enum → bare PascalCase strings). */
+export type AgentAuthStatusDto = 'Valid' | 'Missing' | 'Unknown';
+
 /** Narrowing helper: did a `CheckStatus` fail? */
 export function isFail(status: CheckStatus): status is { Fail: Envelope } {
 	return typeof status === 'object' && status !== null && 'Fail' in status;

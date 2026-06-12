@@ -18,7 +18,10 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 
-use agent::{Agent, AgentConfig, AgentInstallOutcome, LinuxAgentOps, run_agent_install};
+use agent::{
+    Agent, AgentConfig, AgentInstallOutcome, AuthStatusOutcome, LinuxAgentOps, run_agent_install,
+    run_auth_status,
+};
 use bootstrap::{BootstrapOutcome, Config, LinuxOps, run_bootstrap};
 use sink::StdoutSink;
 use workspace::{Action as WorkspaceAction, WorkspaceOutcome, run_workspace};
@@ -48,6 +51,13 @@ enum Command {
         /// An agent to install (repeatable): claude | codex | antigravity.
         #[arg(long = "agent", required = true)]
         agents: Vec<Agent>,
+    },
+    /// Probe whether an agent's local credentials are valid (v0.2 WP4), emitting
+    /// the JSON-lines protocol on stdout.
+    AuthStatus {
+        /// The agent to probe: claude | codex | antigravity.
+        #[arg(long)]
+        agent: Agent,
     },
     /// Manage workspaces inside the distro (v0.2 WP1), emitting the JSON-lines
     /// protocol on stdout.
@@ -108,6 +118,18 @@ fn main() -> ExitCode {
                     // The structured error was already emitted on stdout; leave a
                     // human breadcrumb on stderr (the host discards stderr).
                     eprintln!("cowork: agent install failed ({:?})", env.code);
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some(Command::AuthStatus { agent }) => {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+            let mut ops = LinuxAgentOps;
+            let mut sink = StdoutSink;
+            match run_auth_status(&mut ops, &mut sink, agent, &home) {
+                AuthStatusOutcome::Done => ExitCode::SUCCESS,
+                AuthStatusOutcome::Failed(env) => {
+                    eprintln!("cowork: auth status failed ({:?})", env.code);
                     ExitCode::FAILURE
                 }
             }

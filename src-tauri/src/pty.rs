@@ -6,18 +6,23 @@
 //! off-Windows).
 
 use std::io::Read;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use base64::Engine;
 use cowork_errors::{Envelope, Stage};
-use cowork_host::pty::{WindowsPtySession, pty_bridge_failed_envelope, terminal_launch};
-use tauri::State;
+use cowork_host::pty::{pty_bridge_failed_envelope, terminal_launch, WindowsPtySession};
 use tauri::ipc::Channel;
+use tauri::State;
 
-/// The single embedded-terminal session for the wizard window. `None` until
-/// `pty_spawn`; a fresh spawn kills and replaces any prior session.
+/// The single embedded-terminal session. `None` until `pty_spawn`; a fresh spawn
+/// kills and replaces any prior session. The generation lets stale frontend
+/// cleanup skip killing a newer session after rapid workspace switches.
 #[derive(Default)]
-pub struct PtyState(Mutex<Option<WindowsPtySession>>);
+pub struct PtyState {
+    session: Mutex<Option<(u64, WindowsPtySession)>>,
+    next_generation: AtomicU64,
+}
 
 /// The embedded terminal runs in the wizard's agent-login (auth) step.
 const STAGE: Stage = Stage::Auth;
@@ -40,7 +45,7 @@ pub fn pty_spawn(
     locale: String,
     rows: u16,
     cols: u16,
-) -> Result<(), Envelope> {
+) -> Result<u64, Envelope> {
     let cmd = terminal_launch(&distro, &workspace, &locale);
     let mut session = WindowsPtySession::spawn(&cmd, rows, cols, STAGE)?;
     let reader = session
@@ -54,12 +59,13 @@ pub fn pty_spawn(
 
     // Install the new session, killing any prior one (so its wsl.exe child and
     // its pump thread terminate).
-    let mut guard = state.0.lock().expect("PtyState mutex poisoned");
-    if let Some(mut old) = guard.take() {
+    let generation = state.next_generation.fetch_add(1, Ordering::Relaxed) + 1;
+    let mut guard = state.session.lock().expect("PtyState mutex poisoned");
+    if let Some((_, mut old)) = guard.take() {
         let _ = old.kill(STAGE);
     }
-    *guard = Some(session);
-    Ok(())
+    *guard = Some((generation, session));
+    Ok(generation)
 }
 
 /// Read loop: base64-frame each chunk onto the channel until EOF or the channel
@@ -82,9 +88,9 @@ fn pump(mut reader: Box<dyn Read + Send>, on_data: Channel<String>) {
 /// Forward user keystrokes (xterm `onData`, a UTF-8 string) to the PTY.
 #[tauri::command]
 pub fn pty_write(state: State<'_, PtyState>, data: String) -> Result<(), Envelope> {
-    let mut guard = state.0.lock().expect("PtyState mutex poisoned");
+    let mut guard = state.session.lock().expect("PtyState mutex poisoned");
     match guard.as_mut() {
-        Some(session) => session.write_input(data.as_bytes(), STAGE),
+        Some((_, session)) => session.write_input(data.as_bytes(), STAGE),
         None => Ok(()),
     }
 }
@@ -92,19 +98,25 @@ pub fn pty_write(state: State<'_, PtyState>, data: String) -> Result<(), Envelop
 /// Resize the ConPTY when xterm reflows (`onResize`).
 #[tauri::command]
 pub fn pty_resize(state: State<'_, PtyState>, rows: u16, cols: u16) -> Result<(), Envelope> {
-    let guard = state.0.lock().expect("PtyState mutex poisoned");
+    let guard = state.session.lock().expect("PtyState mutex poisoned");
     match guard.as_ref() {
-        Some(session) => session.resize(rows, cols, STAGE),
+        Some((_, session)) => session.resize(rows, cols, STAGE),
         None => Ok(()),
     }
 }
 
-/// Kill the session (window closing / wizard restart).
+/// Kill the session (window closing / wizard restart). When a generation is
+/// supplied, stale cleanup from a replaced terminal is a no-op.
 #[tauri::command]
-pub fn pty_kill(state: State<'_, PtyState>) -> Result<(), Envelope> {
-    let mut guard = state.0.lock().expect("PtyState mutex poisoned");
+pub fn pty_kill(state: State<'_, PtyState>, generation: Option<u64>) -> Result<(), Envelope> {
+    let mut guard = state.session.lock().expect("PtyState mutex poisoned");
+    if let (Some(expected), Some((current, _))) = (generation, guard.as_ref()) {
+        if *current != expected {
+            return Ok(());
+        }
+    }
     match guard.take() {
-        Some(mut session) => session.kill(STAGE),
+        Some((_, mut session)) => session.kill(STAGE),
         None => Ok(()),
     }
 }

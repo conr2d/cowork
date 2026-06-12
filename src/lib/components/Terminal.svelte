@@ -8,18 +8,41 @@
 	import { base64ToBytes } from '$lib/terminal/decode';
 	import { createUrlScanner } from '$lib/terminal/links';
 
+	const XTERM_LIGHT = {
+		background: '#faf8f5',
+		foreground: '#2c2620',
+		cursor: '#b5532e',
+		cursorAccent: '#faf8f5',
+		selectionBackground: '#e6d6c8'
+	};
+	const XTERM_DARK = {
+		background: '#1a1916',
+		foreground: '#ece6da',
+		cursor: '#e0875c',
+		cursorAccent: '#1a1916',
+		selectionBackground: '#3a342b'
+	};
+
+	function palette(value: 'light' | 'dark') {
+		return value === 'light' ? XTERM_LIGHT : XTERM_DARK;
+	}
+
 	let {
 		distro = 'Cowork',
 		workspace = '~',
 		locale = 'en',
 		detectLinks = false,
-		loginAttempts = 0
+		loginAttempts = 0,
+		theme = undefined,
+		autorun = undefined
 	}: {
 		distro?: string;
 		workspace?: string;
 		locale?: string;
 		detectLinks?: boolean;
 		loginAttempts?: number;
+		theme?: 'light' | 'dark';
+		autorun?: string;
 	} = $props();
 
 	let container: HTMLDivElement | undefined = $state();
@@ -52,10 +75,13 @@
 
 			const term = new Terminal({
 				cursorBlink: true,
-				fontFamily: 'Cascadia Code, Consolas, monospace',
+				fontFamily: theme
+					? "'IBM Plex Mono', Cascadia Code, Consolas, monospace"
+					: 'Cascadia Code, Consolas, monospace',
 				fontSize: 14,
 				allowProposedApi: true,
-				windowsPty: { backend: 'conpty' }
+				windowsPty: { backend: 'conpty' },
+				theme: theme ? palette(theme) : undefined
 			});
 			termRef = term;
 
@@ -107,7 +133,7 @@
 				}
 			};
 
-			await invoke('pty_spawn', {
+			const generation = await invoke<number>('pty_spawn', {
 				onData: channel,
 				distro,
 				workspace,
@@ -116,6 +142,9 @@
 				cols: term.cols
 			});
 			term.focus();
+			if (autorun) {
+				await invoke('pty_write', { data: `${autorun}\n` });
+			}
 
 			const dataSub = term.onData((data) => {
 				void invoke('pty_write', { data });
@@ -130,7 +159,7 @@
 			cleanup = () => {
 				dataSub.dispose();
 				observer.disconnect();
-				void invoke('pty_kill');
+				void invoke('pty_kill', { generation });
 				term.dispose();
 			};
 		})();
@@ -140,6 +169,15 @@
 	// paste (e.g. an auth code) without having to click into the terminal first.
 	$effect(() => {
 		if (loginAttempts > 0) termRef?.focus();
+	});
+
+	$effect(() => {
+		if (theme && termRef) {
+			termRef.options.theme = palette(theme);
+			termRef.refresh(0, termRef.rows - 1);
+			// Claude adapts live; Codex may keep stale background bands until the
+			// session respawns. WP4 adds respawn + resume for that adapter.
+		}
 	});
 
 	onDestroy(() => cleanup?.());

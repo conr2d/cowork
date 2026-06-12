@@ -8,3 +8,9 @@ export async function ptyWrite(data: string): Promise<void> {
 	const { invoke } = await import('@tauri-apps/api/core');
 	await invoke('pty_write', { data });
 }
+
+/** Kill the embedded terminal PTY. A generation token protects newer sessions from stale cleanup. */
+export async function ptyKill(generation?: number): Promise<void> {
+	const { invoke } = await import('@tauri-apps/api/core');
+	await invoke('pty_kill', { generation });
+}

@@ -142,4 +142,17 @@ describe('createMockHost', () => {
 		const host = createMockHost({ failWith: { verifyAgentAuth: envelope } });
 		await expect(host.verifyAgentAuth('claude')).rejects.toEqual(envelope);
 	});
+
+	it('captures scripted session uuids and returns null by default', async () => {
+		const host = createMockHost({ sessionUuids: { codex: 'u1' } });
+		await expect(host.captureSessionUuid('codex', 'default', 0)).resolves.toBe('u1');
+		await expect(host.captureSessionUuid('antigravity', 'default', 0)).resolves.toBeNull();
+	});
+
+	it('syncs agent theme and rejects scripted failures', async () => {
+		const envelope = { code: 'agent.theme_sync_failed', kind: 'Internal', stage: 'workspace' };
+		await expect(createMockHost().agentThemeSync('dark')).resolves.toBeUndefined();
+		const host = createMockHost({ failWith: { agentThemeSync: envelope } });
+		await expect(host.agentThemeSync('light')).rejects.toEqual(envelope);
+	});
 });

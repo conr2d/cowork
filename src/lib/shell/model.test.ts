@@ -146,11 +146,23 @@ describe('sessionLaunch', () => {
 		expect(sessionLaunch('claude', null, true)).toBe('claude');
 	});
 
-	it('launches bare codex until WP4d captures uuid', () => {
+	it('resumes restored codex sessions', () => {
+		expect(sessionLaunch('codex', 'u1', true)).toBe('codex resume u1');
+	});
+
+	it('launches fresh codex sessions bare', () => {
 		expect(sessionLaunch('codex', 'u1', false)).toBe('codex');
 	});
 
-	it('launches bare antigravity until WP4d captures uuid', () => {
+	it('launches codex bare when no uuid exists', () => {
+		expect(sessionLaunch('codex', null, true)).toBe('codex');
+	});
+
+	it('resumes restored antigravity sessions', () => {
+		expect(sessionLaunch('antigravity', 'u1', true)).toBe('agy --conversation u1');
+	});
+
+	it('launches fresh antigravity sessions bare when no uuid exists', () => {
 		expect(sessionLaunch('antigravity', null, false)).toBe('agy');
 	});
 });

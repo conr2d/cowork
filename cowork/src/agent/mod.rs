@@ -10,6 +10,8 @@
 mod auth;
 mod command;
 mod ops;
+mod session;
+mod theme;
 
 use std::time::Duration;
 
@@ -20,6 +22,8 @@ use cowork_errors::protocol::{Message, PROTOCOL_VERSION};
 pub use auth::{AuthStatusOutcome, run_auth_status};
 pub use command::Agent;
 pub use ops::{AgentOps, InstallOutcome, LinuxAgentOps};
+pub use session::{SessionUuidOutcome, run_session_uuid};
+pub use theme::{AgyThemeOutcome, AppTheme, run_agy_theme};
 
 use crate::sink::ProgressSink;
 
@@ -198,6 +202,7 @@ mod tests {
                 }
                 Message::Done { .. } => ("done".to_string(), String::new()),
                 Message::AuthStatus { .. } => ("auth_status".to_string(), String::new()),
+                Message::SessionUuid { .. } => ("session_uuid".to_string(), String::new()),
             };
             self.events.push(pair);
         }

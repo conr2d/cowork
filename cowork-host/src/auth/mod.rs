@@ -46,7 +46,8 @@ pub fn classify_auth_probe(
         match event {
             HostEvent::AuthStatus { status, .. } => return Ok(*status),
             HostEvent::GuestError(env) | HostEvent::ProtocolError(env) => return Err(env.clone()),
-            HostEvent::Progress { .. } | HostEvent::Done { .. } => {}
+            HostEvent::Progress { .. } | HostEvent::Done { .. } | HostEvent::SessionUuid { .. } => {
+            }
         }
     }
     if exit_code != 0 {

@@ -17,9 +17,9 @@
 	import { createShell } from '$lib/shell/store.svelte';
 
 	const shell = createShell(tauriHost);
-	const manager = createSessionManager(shell);
 
 	let theme = $state(loadTheme());
+	const manager = createSessionManager(shell, tauriHost, () => theme);
 	let collapsed = $state(loadCollapsed());
 	let newWorkspaceOpen = $state(false);
 	let renamingSlug = $state<string | null>(null);
@@ -148,7 +148,7 @@
 					if (shell.active) void manager.create(shell.active, agent);
 				}}
 				onactivate={(id) => {
-					if (shell.active) manager.activate(shell.active, id);
+					if (shell.active) void manager.activate(shell.active, id);
 				}}
 				onclose={(id) => {
 					if (shell.active) void manager.close(shell.active, id);

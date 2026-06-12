@@ -30,6 +30,8 @@ pub enum HostEvent {
         agent: String,
         status: AgentAuthStatus,
     },
+    /// The guest reported an agent session UUID capture result (v0.2 WP4d).
+    SessionUuid { agent: String, uuid: Option<String> },
     /// The host detected a protocol fault (`protocol.version_mismatch` or
     /// `protocol.parse_error`) while reading the stream.
     ProtocolError(Envelope),
@@ -80,6 +82,9 @@ impl StreamParser {
             Ok(Message::Done { stage }) => Some(HostEvent::Done { stage }),
             Ok(Message::AuthStatus { agent, status }) => {
                 Some(HostEvent::AuthStatus { agent, status })
+            }
+            Ok(Message::SessionUuid { agent, uuid }) => {
+                Some(HostEvent::SessionUuid { agent, uuid })
             }
             Err(_) => Some(HostEvent::ProtocolError(parse_error_envelope(
                 self.stage, trimmed,

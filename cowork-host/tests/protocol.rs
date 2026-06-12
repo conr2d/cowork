@@ -87,6 +87,32 @@ fn auth_status_message_parses() {
 }
 
 #[test]
+fn session_uuid_message_parses_some() {
+    let mut parser = StreamParser::new(Stage::Workspace);
+    let event = parser
+        .push_line(r#"{"type":"session_uuid","agent":"codex","uuid":"019e"}"#)
+        .expect("session uuid yields an event");
+    let HostEvent::SessionUuid { agent, uuid } = event else {
+        panic!("expected SessionUuid, got {event:?}");
+    };
+    assert_eq!(agent, "codex");
+    assert_eq!(uuid.as_deref(), Some("019e"));
+}
+
+#[test]
+fn session_uuid_message_parses_null() {
+    let mut parser = StreamParser::new(Stage::Workspace);
+    let event = parser
+        .push_line(r#"{"type":"session_uuid","agent":"antigravity","uuid":null}"#)
+        .expect("session uuid yields an event");
+    let HostEvent::SessionUuid { agent, uuid } = event else {
+        panic!("expected SessionUuid, got {event:?}");
+    };
+    assert_eq!(agent, "antigravity");
+    assert_eq!(uuid, None);
+}
+
+#[test]
 fn blank_lines_are_ignored() {
     let mut parser = StreamParser::new(Stage::Provision);
     assert!(parser.push_line("").is_none());
@@ -180,4 +206,15 @@ fn auth_status_serializes_with_snake_case_tag_and_pascal_status() {
     .expect("serialize auth status");
     assert!(json.contains(r#""type":"auth_status""#), "got {json}");
     assert!(json.contains(r#""status":"Missing""#), "got {json}");
+}
+
+#[test]
+fn session_uuid_serializes_with_snake_case_tag() {
+    let json = serde_json::to_string(&Message::SessionUuid {
+        agent: "codex".to_string(),
+        uuid: Some("019e".to_string()),
+    })
+    .expect("serialize session uuid");
+    assert!(json.contains(r#""type":"session_uuid""#), "got {json}");
+    assert!(json.contains(r#""uuid":"019e""#), "got {json}");
 }

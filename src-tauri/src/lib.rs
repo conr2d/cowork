@@ -13,6 +13,7 @@
 
 mod auth;
 mod pty;
+mod session;
 mod setup;
 mod workspace;
 
@@ -54,6 +55,8 @@ pub fn run() {
             workspace::workspace_slug_preview,
             workspace::workspace_open_files,
             auth::verify_agent_auth,
+            session::capture_session_uuid,
+            session::agent_theme_sync,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

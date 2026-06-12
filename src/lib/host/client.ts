@@ -36,6 +36,8 @@ export interface HostClient {
 	workspaceSlugPreview(name: string): Promise<string>;
 	workspaceOpenFiles(slug: string): Promise<void>;
 	verifyAgentAuth(agent: AgentId): Promise<AgentAuthStatusDto>;
+	captureSessionUuid(agent: AgentId, slug: string, sinceMs: number): Promise<string | null>;
+	agentThemeSync(theme: 'light' | 'dark'): Promise<void>;
 }
 
 /** A Tauri command rejection is the serialized backend `Envelope`. */
@@ -120,5 +122,13 @@ export const tauriHost: HostClient = {
 	async verifyAgentAuth(agent) {
 		const { invoke } = await import('@tauri-apps/api/core');
 		return invoke<AgentAuthStatusDto>('verify_agent_auth', { agent });
+	},
+	async captureSessionUuid(agent, slug, sinceMs) {
+		const { invoke } = await import('@tauri-apps/api/core');
+		return invoke<string | null>('capture_session_uuid', { agent, slug, sinceMs });
+	},
+	async agentThemeSync(theme) {
+		const { invoke } = await import('@tauri-apps/api/core');
+		await invoke('agent_theme_sync', { theme });
 	}
 };

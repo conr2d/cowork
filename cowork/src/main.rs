@@ -19,8 +19,9 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 
 use agent::{
-    Agent, AgentConfig, AgentInstallOutcome, AuthStatusOutcome, LinuxAgentOps, run_agent_install,
-    run_auth_status,
+    Agent, AgentConfig, AgentInstallOutcome, AgyThemeOutcome, AppTheme, AuthStatusOutcome,
+    LinuxAgentOps, SessionUuidOutcome, run_agent_install, run_agy_theme, run_auth_status,
+    run_session_uuid,
 };
 use bootstrap::{BootstrapOutcome, Config, LinuxOps, run_bootstrap};
 use sink::StdoutSink;
@@ -58,6 +59,20 @@ enum Command {
         /// The agent to probe: claude | codex | antigravity.
         #[arg(long)]
         agent: Agent,
+    },
+    /// Capture the newest agent conversation UUID for a workspace (since a spawn time).
+    SessionUuid {
+        #[arg(long)]
+        agent: Agent,
+        #[arg(long)]
+        slug: String,
+        #[arg(long)]
+        since_ms: u64,
+    },
+    /// Write antigravity's colorScheme to match the app theme (before an agy spawn).
+    AgentTheme {
+        #[arg(long)]
+        theme: AppTheme,
     },
     /// Manage workspaces inside the distro (v0.2 WP1), emitting the JSON-lines
     /// protocol on stdout.
@@ -130,6 +145,32 @@ fn main() -> ExitCode {
                 AuthStatusOutcome::Done => ExitCode::SUCCESS,
                 AuthStatusOutcome::Failed(env) => {
                     eprintln!("cowork: auth status failed ({:?})", env.code);
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some(Command::SessionUuid {
+            agent,
+            slug,
+            since_ms,
+        }) => {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+            let mut sink = StdoutSink;
+            match run_session_uuid(&mut sink, agent, &home, &slug, since_ms) {
+                SessionUuidOutcome::Done => ExitCode::SUCCESS,
+                SessionUuidOutcome::Failed(env) => {
+                    eprintln!("cowork: session uuid failed ({:?})", env.code);
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some(Command::AgentTheme { theme }) => {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+            let mut sink = StdoutSink;
+            match run_agy_theme(&mut sink, &home, theme) {
+                AgyThemeOutcome::Done => ExitCode::SUCCESS,
+                AgyThemeOutcome::Failed(env) => {
+                    eprintln!("cowork: agent theme failed ({:?})", env.code);
                     ExitCode::FAILURE
                 }
             }

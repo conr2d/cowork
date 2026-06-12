@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::{Code, Envelope, Stage};
 
 /// Wire protocol version. Bump on ANY change to [`Message`]'s shape.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// One line of the guest→host stream. Internally tagged by `type`.
 ///
@@ -40,6 +40,10 @@ pub enum Message {
         agent: String,
         status: AgentAuthStatus,
     },
+    /// Result of a `session-uuid` capture probe: the agent's own conversation
+    /// UUID for the newest session in a workspace, or None if none has
+    /// materialized yet (sessions materialize on the first user message).
+    SessionUuid { agent: String, uuid: Option<String> },
 }
 
 /// Result of an agent auth-status probe (v0.2 WP4). `Valid`/`Missing` reflect
@@ -65,4 +69,32 @@ pub fn version_mismatch_envelope(stage: Stage, host_version: u32, guest_version:
 /// `line` is the offending (already-trimmed) line, stored verbatim for diagnosis.
 pub fn parse_error_envelope(stage: Stage, line: &str) -> Envelope {
     Envelope::new(Code::ProtocolParseError, stage).with_context("line", line)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_uuid_serializes_with_snake_case_tag() {
+        let json = serde_json::to_string(&Message::SessionUuid {
+            agent: "codex".to_string(),
+            uuid: Some("019e".to_string()),
+        })
+        .expect("serialize session uuid");
+        assert!(json.contains(r#""type":"session_uuid""#), "got {json}");
+        assert!(json.contains(r#""agent":"codex""#), "got {json}");
+        assert!(json.contains(r#""uuid":"019e""#), "got {json}");
+    }
+
+    #[test]
+    fn session_uuid_round_trips_null_uuid() {
+        let json = r#"{"type":"session_uuid","agent":"antigravity","uuid":null}"#;
+        let message = serde_json::from_str::<Message>(json).expect("parse session uuid");
+        let Message::SessionUuid { agent, uuid } = message else {
+            panic!("expected session uuid");
+        };
+        assert_eq!(agent, "antigravity");
+        assert_eq!(uuid, None);
+    }
 }

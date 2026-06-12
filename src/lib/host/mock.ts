@@ -26,6 +26,8 @@ export interface MockHostOptions {
 	setupComplete?: boolean;
 	/** Scripted auth-probe results; unspecified agents report 'Valid'. */
 	agentAuth?: Partial<Record<AgentId, AgentAuthStatusDto>>;
+	/** Scripted session UUID capture results; unspecified agents report null. */
+	sessionUuids?: Partial<Record<AgentId, string | null>>;
 	/** If set, the named method rejects with this value (an Envelope). */
 	failWith?: Partial<Record<keyof HostClient, unknown>>;
 }
@@ -209,6 +211,9 @@ export function createMockHost(options: MockHostOptions = {}): HostClient {
 			}
 		},
 		verifyAgentAuth: (agent: AgentId) =>
-			rejectIf('verifyAgentAuth', options.agentAuth?.[agent] ?? 'Valid')
+			rejectIf('verifyAgentAuth', options.agentAuth?.[agent] ?? 'Valid'),
+		captureSessionUuid: (agent: AgentId) =>
+			rejectIf('captureSessionUuid', options.sessionUuids?.[agent] ?? null),
+		agentThemeSync: () => rejectIf('agentThemeSync', undefined)
 	};
 }

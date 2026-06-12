@@ -51,7 +51,7 @@ pub fn run_workspace(action: &Action, home: &str, sink: &mut dyn ProgressSink) -
     WorkspaceOutcome::Done
 }
 
-fn valid_slug(slug: &str) -> bool {
+pub(crate) fn valid_slug(slug: &str) -> bool {
     !slug.is_empty()
         && slug.len() <= 64
         && slug != "."

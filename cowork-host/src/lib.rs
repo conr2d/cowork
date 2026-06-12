@@ -12,6 +12,7 @@ pub mod preflight;
 pub mod protocol;
 pub mod provision;
 pub mod pty;
+pub mod session;
 pub mod setup_marker;
 pub mod workspace;
 pub mod wsl;

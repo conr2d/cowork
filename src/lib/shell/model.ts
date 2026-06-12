@@ -77,16 +77,23 @@ export function nextSessionTitle(sessions: readonly SessionDto[], agent: AgentId
 }
 
 /**
- * The command autorun at PTY spawn for a session. claude rides its own resume:
- * fresh sessions pin a host-generated UUID (--session-id) so a later restore
- * can --resume the conversation; codex/antigravity UUID capture is WP4d, so
- * they spawn bare for now. A restored claude session that never materialized a
- * conversation (no first message) will print claude's own "not found" error —
- * accepted; the user opens a new tab.
+ * The command autorun at PTY spawn for a session. Fresh claude sessions pin a
+ * host-generated UUID (--session-id) so a later restore can resume; codex and
+ * antigravity UUIDs are captured lazily after first activity, so a fresh spawn
+ * is bare and only a restore resumes. A restored session whose conversation
+ * never materialized surfaces the agent's own error — accepted; the user opens
+ * a new tab.
  */
 export function sessionLaunch(agent: AgentId, uuid: string | null, restore: boolean): string {
-	if (agent !== 'claude' || uuid === null) return agentBinary(agent);
-	return restore ? `claude --resume ${uuid}` : `claude --session-id ${uuid}`;
+	if (uuid === null) return agentBinary(agent);
+	switch (agent) {
+		case 'claude':
+			return restore ? `claude --resume ${uuid}` : `claude --session-id ${uuid}`;
+		case 'codex':
+			return restore ? `codex resume ${uuid}` : agentBinary(agent);
+		case 'antigravity':
+			return restore ? `agy --conversation ${uuid}` : agentBinary(agent);
+	}
 }
 
 /**

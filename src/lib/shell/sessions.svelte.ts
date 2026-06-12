@@ -1,6 +1,7 @@
 import { untrack } from 'svelte';
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
+import type { HostClient } from '$lib/host/client';
 import type { WorkspaceDto } from '$lib/host/types';
 import type { AgentId } from '$lib/terminal/login';
 import {
@@ -15,6 +16,8 @@ import type { Shell } from './store.svelte';
 
 /** Output quieter than this marks a working session idle again. */
 const WORKING_QUIET_MS = 2000;
+/** Guards host↔guest clock skew when comparing spawn time against guest file mtimes. */
+const CAPTURE_SKEW_MS = 5000;
 
 export interface SessionManager {
 	/** Mounted terminals, in mount order (one per spawned session). */
@@ -29,7 +32,7 @@ export interface SessionManager {
 	ensureActive(workspace: WorkspaceDto): Promise<void>;
 	/** ⊕ / picker: create + persist + activate. agent=null → the workspace default. */
 	create(workspace: WorkspaceDto, agent: AgentId | null): Promise<void>;
-	activate(workspace: WorkspaceDto, sessionId: string): void;
+	activate(workspace: WorkspaceDto, sessionId: string): Promise<void>;
 	/** Close a tab: unmount (kills its PTY), persist removal, keep a live tab. */
 	close(workspace: WorkspaceDto, sessionId: string): Promise<void>;
 	/** Drop refs whose session/workspace no longer exists. */
@@ -39,7 +42,11 @@ export interface SessionManager {
 	dismissAdvisory(): void;
 }
 
-export function createSessionManager(shell: Shell): SessionManager {
+export function createSessionManager(
+	shell: Shell,
+	host: HostClient,
+	theme: () => 'light' | 'dark'
+): SessionManager {
 	let open = $state<SessionRef[]>([]);
 	const statuses = $state<Record<string, SessionStatus>>({});
 	let advisorySlug = $state<string | null>(null);
@@ -47,6 +54,8 @@ export function createSessionManager(shell: Shell): SessionManager {
 	/** Sessions created in THIS app run (their first spawn is not a resume). */
 	const fresh = new SvelteSet<string>();
 	const timers = new SvelteMap<string, ReturnType<typeof setTimeout>>();
+	const spawnedAt = new SvelteMap<string, number>();
+	const capturing = new SvelteSet<string>();
 
 	function clearTimer(sessionId: string): void {
 		const timer = timers.get(sessionId);
@@ -54,10 +63,48 @@ export function createSessionManager(shell: Shell): SessionManager {
 		timers.delete(sessionId);
 	}
 
-	function activate(workspace: WorkspaceDto, sessionId: string): void {
+	async function maybeCapture(sessionId: string): Promise<void> {
+		const ref = open.find((item) => item.sessionId === sessionId);
+		if (!ref) return;
+		const workspace = shell.workspaces.find((item) => item.slug === ref.slug);
+		const session = workspace?.sessions.find((item) => item.id === sessionId);
+		if (!workspace || !session) return;
+		if (session.agent === 'claude' || session.agentSessionUuid || capturing.has(sessionId)) {
+			return;
+		}
+		capturing.add(sessionId);
+		try {
+			const since = Math.max(0, (spawnedAt.get(sessionId) ?? 0) - CAPTURE_SKEW_MS);
+			const uuid = await host.captureSessionUuid(session.agent, workspace.slug, since);
+			if (uuid === null) return;
+			// Re-resolve after the await: the workspace object may have been replaced.
+			const current = shell.workspaces.find((item) => item.slug === ref.slug);
+			if (!current?.sessions.some((item) => item.id === sessionId)) return;
+			await shell.updateSessions(
+				current.slug,
+				current.sessions.map((item) =>
+					item.id === sessionId ? { ...item, agentSessionUuid: uuid } : item
+				)
+			);
+		} catch {
+			// Best-effort: a failed capture retries on the next idle/exit transition.
+		} finally {
+			capturing.delete(sessionId);
+		}
+	}
+
+	async function activate(workspace: WorkspaceDto, sessionId: string): Promise<void> {
 		activeBySlug[workspace.slug] = sessionId;
 		statuses[sessionId] ??= 'cold';
 		if (!open.some((ref) => ref.sessionId === sessionId)) {
+			const session = workspace.sessions.find((item) => item.id === sessionId);
+			if (session?.agent === 'antigravity') {
+				try {
+					await host.agentThemeSync(theme());
+				} catch {
+					// Best-effort: a failed sync still mounts; the scheme may be stale.
+				}
+			}
 			open.push({ slug: workspace.slug, sessionId });
 		}
 	}
@@ -89,7 +136,7 @@ export function createSessionManager(shell: Shell): SessionManager {
 		const persisted = shell.workspaces.find((item) => item.slug === workspace.slug);
 		if (!persisted || !persisted.sessions.some((session) => session.id === id)) return;
 		fresh.add(id);
-		activate(persisted, id);
+		await activate(persisted, id);
 	}
 
 	return {
@@ -117,13 +164,15 @@ export function createSessionManager(shell: Shell): SessionManager {
 			const target = workspace.sessions.some((session) => session.id === current)
 				? current
 				: sortedSessions(workspace.sessions)[0].id;
-			activate(workspace, target);
+			await activate(workspace, target);
 		},
 		create,
 		activate,
 		async close(workspace, sessionId) {
 			open = open.filter((ref) => ref.sessionId !== sessionId);
 			fresh.delete(sessionId);
+			spawnedAt.delete(sessionId);
+			capturing.delete(sessionId);
 			clearTimer(sessionId);
 			delete statuses[sessionId];
 			await shell.updateSessions(
@@ -138,7 +187,7 @@ export function createSessionManager(shell: Shell): SessionManager {
 				return;
 			}
 			if (activeBySlug[workspace.slug] === sessionId) {
-				activate(persisted, sortedSessions(persisted.sessions)[0].id);
+				await activate(persisted, sortedSessions(persisted.sessions)[0].id);
 			}
 		},
 		prune(workspaces) {
@@ -150,12 +199,14 @@ export function createSessionManager(shell: Shell): SessionManager {
 			);
 		},
 		noteSpawn(sessionId) {
+			spawnedAt.set(sessionId, Date.now());
 			statuses[sessionId] = 'idle';
 		},
 		noteActivity(sessionId, event) {
 			if (event === 'exit') {
 				clearTimer(sessionId);
 				statuses[sessionId] = 'done';
+				void maybeCapture(sessionId);
 				return;
 			}
 			statuses[sessionId] = 'working';
@@ -164,7 +215,10 @@ export function createSessionManager(shell: Shell): SessionManager {
 				sessionId,
 				setTimeout(() => {
 					timers.delete(sessionId);
-					if (statuses[sessionId] === 'working') statuses[sessionId] = 'idle';
+					if (statuses[sessionId] === 'working') {
+						statuses[sessionId] = 'idle';
+						void maybeCapture(sessionId);
+					}
 				}, WORKING_QUIET_MS)
 			);
 		},

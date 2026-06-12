@@ -16,6 +16,7 @@ export const STAGES = [
 	'toolchain',
 	'agent-install',
 	'auth',
+	'workspace',
 	'done'
 ] as const;
 export type Stage = (typeof STAGES)[number];

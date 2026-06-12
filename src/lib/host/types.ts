@@ -4,6 +4,7 @@
 // do not "fix" it here, it must mirror the wire).
 
 import type { Envelope, Stage } from '$lib/errors/registry';
+import type { AgentId } from '$lib/terminal/login';
 
 export type { Envelope, Stage };
 
@@ -48,6 +49,35 @@ export interface ResumeDto {
 export interface ProgressEvent {
 	stage: Stage;
 	step: string;
+}
+
+export interface SessionDto {
+	id: string;
+	agent: AgentId;
+	agentSessionUuid?: string | null;
+	title: string;
+	order: number;
+}
+
+export interface WorkspaceDto {
+	name: string;
+	slug: string;
+	createdMs: number;
+	pinned: boolean;
+	pinOrder?: number | null;
+	lastUsedMs: number;
+	defaultAgent: AgentId;
+	preset: string;
+	sessions: SessionDto[];
+}
+
+export interface WorkspacePatch {
+	name?: string;
+	pinned?: boolean;
+	pinOrder?: number | null;
+	lastUsedMs?: number;
+	defaultAgent?: AgentId;
+	preset?: string;
 }
 
 /** Narrowing helper: did a `CheckStatus` fail? */

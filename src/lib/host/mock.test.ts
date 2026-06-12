@@ -39,4 +39,42 @@ describe('createMockHost', () => {
 		expect(await host.isResumeLaunch()).toBe(true);
 		expect(await host.getResumeState()).toEqual({ stage: 'WslReady', selectedAgents: ['codex'] });
 	});
+
+	it('creates workspaces with derived slugs and grows the list', async () => {
+		const host = createMockHost();
+		const created = await host.workspaceCreate('PDF Translate', 'codex', 'blank');
+		expect(created.slug).toBe('pdf-translate');
+		expect(await host.workspaceList()).toHaveLength(2);
+	});
+
+	it('rejects empty workspace names', async () => {
+		const host = createMockHost();
+		await expect(host.workspaceCreate(' ', 'claude', 'blank')).rejects.toMatchObject({
+			code: 'workspace.invalid_name'
+		});
+	});
+
+	it('suffixes workspace slug collisions', async () => {
+		const host = createMockHost();
+		const created = await host.workspaceCreate('default', 'claude', 'blank');
+		expect(created.slug).toBe('default-2');
+	});
+
+	it('updates workspace names without changing slug and rejects unknown slugs', async () => {
+		const host = createMockHost();
+		const updated = await host.workspaceUpdate('default', { name: 'Renamed' });
+		expect(updated.name).toBe('Renamed');
+		expect(updated.slug).toBe('default');
+		await expect(host.workspaceUpdate('missing', { name: 'Nope' })).rejects.toMatchObject({
+			code: 'workspace.not_found'
+		});
+	});
+
+	it('deletes workspaces idempotently', async () => {
+		const host = createMockHost();
+		await host.workspaceDelete('default');
+		expect(await host.workspaceList()).toEqual([]);
+		await host.workspaceDelete('default');
+		expect(await host.workspaceList()).toEqual([]);
+	});
 });

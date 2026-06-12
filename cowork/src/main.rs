@@ -12,6 +12,7 @@ mod agent;
 mod bootstrap;
 mod cmd;
 mod sink;
+mod workspace;
 
 use std::process::ExitCode;
 
@@ -20,6 +21,7 @@ use clap::{Parser, Subcommand};
 use agent::{Agent, AgentConfig, AgentInstallOutcome, LinuxAgentOps, run_agent_install};
 use bootstrap::{BootstrapOutcome, Config, LinuxOps, run_bootstrap};
 use sink::StdoutSink;
+use workspace::{Action as WorkspaceAction, WorkspaceOutcome, run_workspace};
 
 #[derive(Parser)]
 #[command(
@@ -46,6 +48,26 @@ enum Command {
         /// An agent to install (repeatable): claude | codex | antigravity.
         #[arg(long = "agent", required = true)]
         agents: Vec<Agent>,
+    },
+    /// Manage workspaces inside the distro (v0.2 WP1), emitting the JSON-lines
+    /// protocol on stdout.
+    Workspace {
+        #[command(subcommand)]
+        action: WorkspaceCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum WorkspaceCmd {
+    /// Create ~/workspaces/<slug>/ and its files/ subdir (idempotent).
+    Create {
+        #[arg(long)]
+        slug: String,
+    },
+    /// Remove ~/workspaces/<slug>/ recursively (idempotent).
+    Remove {
+        #[arg(long)]
+        slug: String,
     },
 }
 
@@ -86,6 +108,21 @@ fn main() -> ExitCode {
                     // The structured error was already emitted on stdout; leave a
                     // human breadcrumb on stderr (the host discards stderr).
                     eprintln!("cowork: agent install failed ({:?})", env.code);
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some(Command::Workspace { action }) => {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+            let mut sink = StdoutSink;
+            let action = match action {
+                WorkspaceCmd::Create { slug } => WorkspaceAction::Create { slug },
+                WorkspaceCmd::Remove { slug } => WorkspaceAction::Remove { slug },
+            };
+            match run_workspace(&action, &home, &mut sink) {
+                WorkspaceOutcome::Done => ExitCode::SUCCESS,
+                WorkspaceOutcome::Failed => {
+                    eprintln!("cowork: workspace failed");
                     ExitCode::FAILURE
                 }
             }

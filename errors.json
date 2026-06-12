@@ -1,7 +1,7 @@
 {
 	"$comment": "Single source of truth for Cowork error codes (v0.1). Rust: cowork-errors/build.rs codegens the Code enum from this file. TS: src/lib/errors imports it directly. Localized errors.<code>.{title,body} strings live in the Paraglide catalogs (messages/{en,ja,ko}.json) and are checked against this set by the 3-locale parity test (WP2-loc). Per-code schema: { kind, contextKeys }. `kind` drives UI treatment; `contextKeys` are the camelCase keys the envelope's `context` may carry for ICU interpolation. `stage` is NOT stored here — it is a runtime property of the envelope (the same code can fire at multiple stages).",
 	"kinds": ["Blocker", "NeedsUserAction", "Transient", "Internal", "Cancelled"],
-	"stages": ["preflight", "wsl-enable", "provision", "toolchain", "agent-install", "auth", "done"],
+	"stages": ["preflight", "wsl-enable", "provision", "toolchain", "agent-install", "auth", "workspace", "done"],
 	"codes": {
 		"preflight.windows_build_unsupported": { "kind": "Blocker", "contextKeys": ["build", "minBuild"] },
 		"preflight.arch_unsupported": { "kind": "Blocker", "contextKeys": ["arch"] },
@@ -52,6 +52,13 @@
 		"auth.browser_launch_failed": { "kind": "NeedsUserAction", "contextKeys": ["agent"] },
 		"auth.oauth_callback_failed": { "kind": "NeedsUserAction", "contextKeys": ["agent"] },
 		"auth.agent_not_found": { "kind": "Internal", "contextKeys": ["agent"] },
+
+		"workspace.invalid_name": { "kind": "NeedsUserAction", "contextKeys": ["name"] },
+		"workspace.not_found": { "kind": "Internal", "contextKeys": ["slug"] },
+		"workspace.create_failed": { "kind": "Internal", "contextKeys": ["slug"] },
+		"workspace.delete_failed": { "kind": "Internal", "contextKeys": ["slug"] },
+		"workspace.metadata_io_failed": { "kind": "Internal", "contextKeys": ["op"] },
+		"workspace.metadata_corrupt": { "kind": "Internal", "contextKeys": [] },
 
 		"host.wsl_not_found": { "kind": "Internal", "contextKeys": [] },
 		"host.pty_spawn_failed": { "kind": "Internal", "contextKeys": ["detail"] },

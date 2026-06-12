@@ -13,6 +13,7 @@
 
 mod pty;
 mod setup;
+mod workspace;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -34,6 +35,11 @@ pub fn run() {
             setup::is_resume_launch,
             setup::get_resume_state,
             setup::clear_resume,
+            workspace::workspace_create,
+            workspace::workspace_list,
+            workspace::workspace_update,
+            workspace::workspace_delete,
+            workspace::workspace_slug_preview,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

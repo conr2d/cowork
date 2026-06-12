@@ -5,7 +5,7 @@
 //! impl (`windows_provision`) is the only OS-specific part.
 
 mod command;
-#[cfg(any(windows, test))]
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
 mod inject;
 pub mod list;
 #[cfg(any(windows, test))]
@@ -20,7 +20,6 @@ pub use command::{
     install_named_args, rootfs_fetch_failed_envelope, unregister_args, unregister_failed_envelope,
     user_create_failed_envelope, verify_checksum,
 };
-#[cfg(any(windows, test))]
 pub use inject::{
     GUEST_BIN_PATH, RunOutcome, classify_run, firstboot_setup_args, launch_args, terminate_args,
     unc_inject_path,

@@ -9,6 +9,8 @@ import type {
 	ProgressEvent,
 	ProvisionDto,
 	ResumeDto,
+	WorkspaceDto,
+	WorkspacePatch,
 	WslEnableDto
 } from './types';
 
@@ -39,8 +41,60 @@ const PASS_REPORT: PreflightReport = {
 	can_proceed: true
 };
 
+const DEFAULT_WORKSPACE: WorkspaceDto = {
+	name: 'default',
+	slug: 'default',
+	createdMs: 0,
+	pinned: false,
+	pinOrder: null,
+	lastUsedMs: 0,
+	defaultAgent: 'claude',
+	preset: 'blank',
+	sessions: []
+};
+
+function workspaceEnvelope(
+	code: 'workspace.invalid_name' | 'workspace.not_found',
+	kind: 'NeedsUserAction' | 'Internal',
+	context: Record<string, string>
+) {
+	return { code, kind, stage: 'workspace', context };
+}
+
+function previewSlug(name: string, existing: string[]): string {
+	const trimmed = name.trim();
+	if (trimmed === '') {
+		throw workspaceEnvelope('workspace.invalid_name', 'NeedsUserAction', { name });
+	}
+	let out = '';
+	let lastWasDash = false;
+	for (const ch of trimmed.toLocaleLowerCase()) {
+		if (/[\p{L}\p{N}]/u.test(ch)) {
+			out += ch;
+			lastWasDash = false;
+		} else if (ch === '-' || ch === '_') {
+			out += ch;
+			lastWasDash = ch === '-';
+		} else if (/\s/u.test(ch) && !lastWasDash) {
+			out += '-';
+			lastWasDash = true;
+		}
+	}
+	out = out
+		.replace(/-+/g, '-')
+		.replace(/^[-_]+|[-_]+$/g, '')
+		.slice(0, 40);
+	if (out === '') out = 'workspace';
+	if (!existing.includes(out)) return out;
+	for (let n = 2; ; n += 1) {
+		const candidate = `${out}-${n}`;
+		if (!existing.includes(candidate)) return candidate;
+	}
+}
+
 export function createMockHost(options: MockHostOptions = {}): HostClient {
 	const fail = options.failWith ?? {};
+	const workspaces: WorkspaceDto[] = [{ ...DEFAULT_WORKSPACE }];
 	const rejectIf = <T>(method: keyof HostClient, value: T): Promise<T> =>
 		method in fail ? Promise.reject(fail[method]) : Promise.resolve(value);
 
@@ -76,6 +130,64 @@ export function createMockHost(options: MockHostOptions = {}): HostClient {
 		removeCoworkDistro: () => rejectIf('removeCoworkDistro', undefined),
 		isResumeLaunch: () => rejectIf('isResumeLaunch', options.resumeLaunch ?? false),
 		getResumeState: () => rejectIf('getResumeState', options.resumeState ?? null),
-		clearResume: () => rejectIf('clearResume', undefined)
+		clearResume: () => rejectIf('clearResume', undefined),
+		workspaceCreate: async (name: string, defaultAgent: AgentId, preset: string) => {
+			if ('workspaceCreate' in fail) return Promise.reject(fail.workspaceCreate);
+			const slug = previewSlug(
+				name,
+				workspaces.map((workspace) => workspace.slug)
+			);
+			const workspace: WorkspaceDto = {
+				name: name.trim(),
+				slug,
+				createdMs: Date.now(),
+				pinned: false,
+				pinOrder: null,
+				lastUsedMs: Date.now(),
+				defaultAgent,
+				preset,
+				sessions: []
+			};
+			workspaces.push(workspace);
+			return workspace;
+		},
+		workspaceList: () =>
+			rejectIf(
+				'workspaceList',
+				workspaces.map((workspace) => ({ ...workspace }))
+			),
+		workspaceUpdate: async (slug: string, patch: WorkspacePatch) => {
+			if ('workspaceUpdate' in fail) return Promise.reject(fail.workspaceUpdate);
+			const workspace = workspaces.find((item) => item.slug === slug);
+			if (!workspace) {
+				return Promise.reject(workspaceEnvelope('workspace.not_found', 'Internal', { slug }));
+			}
+			if (patch.name !== undefined) {
+				if (patch.name.trim() === '') {
+					return Promise.reject(
+						workspaceEnvelope('workspace.invalid_name', 'NeedsUserAction', { name: patch.name })
+					);
+				}
+				workspace.name = patch.name.trim();
+			}
+			if (patch.pinned !== undefined) workspace.pinned = patch.pinned;
+			if (patch.pinOrder !== undefined) workspace.pinOrder = patch.pinOrder;
+			if (patch.lastUsedMs !== undefined) workspace.lastUsedMs = patch.lastUsedMs;
+			if (patch.defaultAgent !== undefined) workspace.defaultAgent = patch.defaultAgent;
+			if (patch.preset !== undefined) workspace.preset = patch.preset;
+			return { ...workspace };
+		},
+		workspaceDelete: async (slug: string) => {
+			if ('workspaceDelete' in fail) return Promise.reject(fail.workspaceDelete);
+			const index = workspaces.findIndex((workspace) => workspace.slug === slug);
+			if (index >= 0) workspaces.splice(index, 1);
+		},
+		workspaceSlugPreview: async (name: string) => {
+			if ('workspaceSlugPreview' in fail) return Promise.reject(fail.workspaceSlugPreview);
+			return previewSlug(
+				name,
+				workspaces.map((workspace) => workspace.slug)
+			);
+		}
 	};
 }

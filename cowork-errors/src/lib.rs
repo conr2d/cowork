@@ -40,6 +40,8 @@ pub enum Stage {
     AgentInstall,
     #[serde(rename = "auth")]
     Auth,
+    #[serde(rename = "workspace")]
+    Workspace,
     #[serde(rename = "done")]
     Done,
 }

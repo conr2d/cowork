@@ -10,6 +10,8 @@ import type {
 	ProgressEvent,
 	ProvisionDto,
 	ResumeDto,
+	WorkspaceDto,
+	WorkspacePatch,
 	WslEnableDto
 } from './types';
 
@@ -24,6 +26,11 @@ export interface HostClient {
 	isResumeLaunch(): Promise<boolean>;
 	getResumeState(): Promise<ResumeDto | null>;
 	clearResume(): Promise<void>;
+	workspaceCreate(name: string, defaultAgent: AgentId, preset: string): Promise<WorkspaceDto>;
+	workspaceList(): Promise<WorkspaceDto[]>;
+	workspaceUpdate(slug: string, patch: WorkspacePatch): Promise<WorkspaceDto>;
+	workspaceDelete(slug: string): Promise<void>;
+	workspaceSlugPreview(name: string): Promise<string>;
 }
 
 /** A Tauri command rejection is the serialized backend `Envelope`. */
@@ -72,5 +79,25 @@ export const tauriHost: HostClient = {
 	async clearResume() {
 		const { invoke } = await import('@tauri-apps/api/core');
 		await invoke('clear_resume');
+	},
+	async workspaceCreate(name, defaultAgent, preset) {
+		const { invoke } = await import('@tauri-apps/api/core');
+		return invoke<WorkspaceDto>('workspace_create', { name, defaultAgent, preset });
+	},
+	async workspaceList() {
+		const { invoke } = await import('@tauri-apps/api/core');
+		return invoke<WorkspaceDto[]>('workspace_list');
+	},
+	async workspaceUpdate(slug, patch) {
+		const { invoke } = await import('@tauri-apps/api/core');
+		return invoke<WorkspaceDto>('workspace_update', { slug, patch });
+	},
+	async workspaceDelete(slug) {
+		const { invoke } = await import('@tauri-apps/api/core');
+		await invoke('workspace_delete', { slug });
+	},
+	async workspaceSlugPreview(name) {
+		const { invoke } = await import('@tauri-apps/api/core');
+		return invoke<string>('workspace_slug_preview', { name });
 	}
 };

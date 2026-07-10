@@ -121,6 +121,8 @@ jobs:
         run: |
           sudo -u cowork -i cowork bootstrap
           sudo -u cowork -i cowork agent-install --agent claude
+          # Re-run must take the resolve-and-skip path: an agent already present is not reinstalled.
+          sudo -u cowork -i cowork agent-install --agent claude
       # Toolchain activation lives in ~/.profile, so a login shell — interactive
       # or not — has brew and mise on PATH.
       - name: Assert the happy path
@@ -232,6 +234,9 @@ jobs:
           # IP. Bounded by a Linux-side timeout with an EOF stdin, as above.
           cmd /c "wsl -d Cowork -u cowork -- timeout 300 /usr/local/bin/cowork agent-install --agent claude < nul"
           if ($LASTEXITCODE -ne 0) { throw "claude install failed (exit $LASTEXITCODE; 124 = timed out)" }
+          # Re-run must take the resolve-and-skip path: an agent already present is not reinstalled.
+          cmd /c "wsl -d Cowork -u cowork -- timeout 300 /usr/local/bin/cowork agent-install --agent claude < nul"
+          if ($LASTEXITCODE -ne 0) { throw "claude reinstall skip failed (exit $LASTEXITCODE; 124 = timed out)" }
           wsl -d Cowork -u cowork -- bash -lc 'set -euo pipefail; command -v claude && test ! -e "$HOME/.cowork"'
       # NOTE: codex agent install is deliberately NOT exercised in CI. Its installer
       # resolves versions and asset URLs via api.github.com, which is unauthenticated

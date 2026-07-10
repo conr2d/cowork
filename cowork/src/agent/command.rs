@@ -30,7 +30,7 @@ impl Agent {
         }
     }
 
-    /// Installed binary name under `~/.local/bin`.
+    /// Installed binary name.
     pub fn binary(self) -> &'static str {
         match self {
             Agent::Claude => "claude",
@@ -68,7 +68,8 @@ impl Agent {
     }
 }
 
-/// Absolute installed binary path for `agent`.
+/// Absolute binary path where Cowork's own installer puts `agent`; this is only
+/// the path we name when resolution fails after an install.
 pub fn bin_path(agent: Agent, home: &str) -> String {
     format!("{home}/.local/bin/{}", agent.binary())
 }
@@ -97,9 +98,33 @@ pub fn install_cmd(agent: Agent) -> Cmd {
     cmd
 }
 
-/// `--version` verification command for the installed agent binary.
-pub fn verify_cmd(agent: Agent, home: &str) -> Cmd {
-    Cmd::new(&bin_path(agent, home), &["--version"])
+/// `bash -lc 'command -v <binary>'` — ask a **login** shell where the agent's
+/// binary is. A login shell sources `~/.profile`, which puts `~/.local/bin`, the
+/// Homebrew prefix and mise's shims on `PATH` (see `bootstrap::command::profile_lines`);
+/// this process's own `PATH` has none of them. `command -v` is a shell builtin, so
+/// it also honours anything the user put on `PATH` themselves.
+pub fn resolve_cmd(agent: Agent) -> Cmd {
+    Cmd::new("bash", &["-lc", &format!("command -v {}", agent.binary())])
+}
+
+/// The absolute path `command -v` reported, or `None`.
+///
+/// `output` is the combined stdout+stderr of [`resolve_cmd`], and a login shell may
+/// print to either (a `~/.profile` that echoes, a MOTD). So: take the **last**
+/// line that is an absolute path. `command -v` prints a bare name for a shell
+/// builtin, function or alias — none of which we can exec — so anything that is
+/// not absolute is not a hit.
+pub fn parse_resolved_bin(output: &str) -> Option<String> {
+    output
+        .lines()
+        .map(str::trim)
+        .rfind(|line| line.starts_with('/'))
+        .map(str::to_string)
+}
+
+/// `--version` verification command for the resolved agent binary.
+pub fn verify_cmd(bin: &str) -> Cmd {
+    Cmd::new(bin, &["--version"])
 }
 
 /// `set -o pipefail; curl … | <runner>` — a curl-pipe-shell installer that fails
@@ -138,6 +163,11 @@ pub fn integrity_check_failed_envelope(agent: Agent) -> Envelope {
 /// Stable install step key for `agent`.
 pub fn install_step(agent: Agent) -> String {
     format!("install-{}", agent.id())
+}
+
+/// Stable resolve step key for `agent`.
+pub fn resolve_step(agent: Agent) -> String {
+    format!("resolve-{}", agent.id())
 }
 
 /// Stable verify step key for `agent`.
@@ -188,13 +218,64 @@ mod tests {
     }
 
     #[test]
-    fn verify_cmd_runs_versioned_binary_at_local_bin() {
-        for agent in [Agent::Claude, Agent::Codex, Agent::Antigravity] {
-            let c = verify_cmd(agent, "/home/u");
-            assert_eq!(c.program, bin_path(agent, "/home/u"));
-            assert_eq!(c.args, vec!["--version".to_string()]);
-            assert!(c.env.is_empty());
-        }
+    fn resolve_cmd_uses_login_shell_command_v() {
+        let c = resolve_cmd(Agent::Claude);
+        assert_eq!(c.program, "bash");
+        assert_eq!(
+            c.args,
+            vec!["-lc".to_string(), "command -v claude".to_string()]
+        );
+        assert!(c.env.is_empty());
+    }
+
+    #[test]
+    fn parse_resolved_bin_accepts_absolute_path() {
+        assert_eq!(
+            parse_resolved_bin("/home/u/.local/bin/claude\n"),
+            Some("/home/u/.local/bin/claude".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_resolved_bin_rejects_empty_output() {
+        assert_eq!(parse_resolved_bin(""), None);
+    }
+
+    #[test]
+    fn parse_resolved_bin_rejects_bare_builtin_name() {
+        assert_eq!(parse_resolved_bin("claude\n"), None);
+    }
+
+    #[test]
+    fn parse_resolved_bin_ignores_noise_before_answer() {
+        assert_eq!(
+            parse_resolved_bin("some banner\n/usr/local/bin/codex\n"),
+            Some("/usr/local/bin/codex".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_resolved_bin_takes_last_absolute_line() {
+        assert_eq!(
+            parse_resolved_bin("/first/claude\n/second/claude\n"),
+            Some("/second/claude".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_resolved_bin_trims_path_whitespace() {
+        assert_eq!(
+            parse_resolved_bin("  /home/u/.local/bin/agy  \n"),
+            Some("/home/u/.local/bin/agy".to_string())
+        );
+    }
+
+    #[test]
+    fn verify_cmd_runs_versioned_resolved_binary() {
+        let c = verify_cmd("/usr/local/bin/claude");
+        assert_eq!(c.program, "/usr/local/bin/claude");
+        assert_eq!(c.args, vec!["--version".to_string()]);
+        assert!(c.env.is_empty());
     }
 
     #[test]
@@ -246,6 +327,7 @@ mod tests {
 
     #[test]
     fn step_keys() {
+        assert_eq!(resolve_step(Agent::Claude), "resolve-claude");
         assert_eq!(install_step(Agent::Claude), "install-claude");
         assert_eq!(verify_step(Agent::Codex), "verify-codex");
     }

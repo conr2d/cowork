@@ -1,7 +1,7 @@
 //! The side-effect seam for agent install. The pure orchestration in `super`
 //! drives a `&mut dyn AgentOps`; the real Linux impl ([`LinuxAgentOps`]) runs
-//! installers (with a hang-guard timeout, stdin closed) and touches the
-//! filesystem, while tests substitute a mock. Like
+//! installers (with a hang-guard timeout, stdin closed) and short checks, while
+//! tests substitute a mock. Like
 //! [`crate::bootstrap::ops::LinuxOps`], [`LinuxAgentOps`] is thin glue verified
 //! at the WP10 e2e gate, not by unit tests.
 
@@ -30,8 +30,6 @@ pub trait AgentOps {
     fn run_installer(&mut self, cmd: &Cmd, timeout: Duration) -> InstallOutcome;
     /// Run a short verification command (e.g. `--version`).
     fn run_check(&mut self, cmd: &Cmd) -> InstallOutcome;
-    /// Whether `path` exists (post-install binary probe).
-    fn path_exists(&self, path: &str) -> bool;
 }
 
 /// The real Linux implementation (runs inside the WSL distro).
@@ -147,10 +145,6 @@ impl AgentOps for LinuxAgentOps {
 
     fn run_check(&mut self, cmd: &Cmd) -> InstallOutcome {
         run_with_optional_timeout(cmd, None)
-    }
-
-    fn path_exists(&self, path: &str) -> bool {
-        std::path::Path::new(path).exists()
     }
 }
 

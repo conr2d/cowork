@@ -5,7 +5,7 @@
 //! [`crate::bootstrap::ops::LinuxOps`], [`LinuxAgentOps`] is thin glue verified
 //! at the WP10 e2e gate, not by unit tests.
 
-use std::io::{Read, Write};
+use std::io::Read;
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::thread;
@@ -32,17 +32,6 @@ pub trait AgentOps {
     fn run_check(&mut self, cmd: &Cmd) -> InstallOutcome;
     /// Whether `path` exists (post-install binary probe).
     fn path_exists(&self, path: &str) -> bool;
-    /// Read a file to a string, or `None` if it does not exist / cannot be read.
-    fn read_to_string(&self, path: &str) -> Option<String>;
-    /// Append `line` (a trailing newline is added) to `path`, creating it if
-    /// absent. `Err` carries a short diagnostic string.
-    fn append_line(&mut self, path: &str, line: &str) -> Result<(), String>;
-    /// Create `path` and all parents (idempotent, like `mkdir -p`).
-    fn create_dir_all(&mut self, path: &str) -> Result<(), String>;
-    /// Create a symlink at `link` pointing to `target`. Idempotent: if `link`
-    /// already resolves to `target`, succeed; if `link` exists as something
-    /// else, `Err` (never clobber existing data).
-    fn symlink(&mut self, target: &str, link: &str) -> Result<(), String>;
 }
 
 /// The real Linux implementation (runs inside the WSL distro).
@@ -162,34 +151,6 @@ impl AgentOps for LinuxAgentOps {
 
     fn path_exists(&self, path: &str) -> bool {
         std::path::Path::new(path).exists()
-    }
-
-    fn read_to_string(&self, path: &str) -> Option<String> {
-        std::fs::read_to_string(path).ok()
-    }
-
-    fn append_line(&mut self, path: &str, line: &str) -> Result<(), String> {
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .map_err(|e| e.to_string())?;
-        writeln!(file, "{line}").map_err(|e| e.to_string())
-    }
-
-    fn create_dir_all(&mut self, path: &str) -> Result<(), String> {
-        std::fs::create_dir_all(path).map_err(|e| e.to_string())
-    }
-
-    fn symlink(&mut self, target: &str, link: &str) -> Result<(), String> {
-        let link_path = std::path::Path::new(link);
-        if link_path.exists() || link_path.is_symlink() {
-            match std::fs::read_link(link_path) {
-                Ok(existing) if existing == std::path::Path::new(target) => return Ok(()),
-                _ => return Err(format!("{link} already exists")),
-            }
-        }
-        std::os::unix::fs::symlink(target, link).map_err(|e| e.to_string())
     }
 }
 

@@ -11,6 +11,8 @@ use serde_json::{Map, Value};
 
 use crate::sink::ProgressSink;
 
+use super::command::{self, Agent};
+
 /// App theme the agy adapter maps to a colorScheme agy renders legibly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum AppTheme {
@@ -56,10 +58,7 @@ pub fn run_agy_theme(sink: &mut dyn ProgressSink, home: &str, theme: AppTheme) -
 }
 
 fn write_agy_theme(home: &str, theme: AppTheme) -> Result<(), String> {
-    let path = Path::new(home)
-        .join(".gemini")
-        .join("antigravity-cli")
-        .join("settings.json");
+    let path = Path::new(&command::config_dir(Agent::Antigravity, home)).join("settings.json");
     let parent = path.parent().expect("settings path has parent");
     fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
 

@@ -223,7 +223,7 @@ for agent in claude codex agy; do
   test -x "$HOME/.local/bin/$agent" && echo "OK $HOME/.local/bin/$agent" || echo "MISSING $HOME/.local/bin/$agent"
 done
 echo "creds"
-ls "$HOME/.cowork/creds"'
+ls -d "$HOME/.claude" "$HOME/.codex" "$HOME/.gemini/antigravity-cli" 2>/dev/null'
         }
 
         Write-Host "Compare the guest output against docs/wp10-full-gate.md." -ForegroundColor Yellow

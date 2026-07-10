@@ -124,8 +124,8 @@ From a freshly reverted `ready-to-install` checkpoint:
 | 4.4 | **WSL enable/update** | UAC prompt → accept; `wsl --install --no-distribution` + `wsl --update`; WSL app ≥ 2.4.4 |
 | 4.5 | **Reboot + auto-resume** | Wizard writes `Cowork.exe --resume` to `HKCU\...\RunOnce`, reboots, **auto-relaunches after login with no user action**, resumes at the right step; the `RunOnce` value is consumed (not left to loop) |
 | 4.6 | **Provision distro** | A distro named **`Cowork`** is created from the published rootfs (`wsl --import`, new `.tar.gz` format); `wsl -l -v` shows `Cowork` |
-| 4.7 | **Toolchain + agent install** | brew + mise present; for each selected agent the binary installs (`claude`/`codex`/`agy`); creds routed under `~/.cowork/creds/...` |
-| 4.8 | **Auth (real OAuth)** | Running the agent's login from the embedded terminal **opens the host Windows browser via WSLInterop**, completes OAuth; with Interop disabled, the printed-URL/device-code fallback completes login; the post-login token lands under (or is redirected into) `~/.cowork/creds/<agent>` |
+| 4.7 | **Toolchain + agent install** | brew + mise present; for each selected agent the binary installs (`claude`/`codex`/`agy`) and `--version` passes |
+| 4.8 | **Auth (real OAuth)** | Running the agent's login from the embedded terminal **opens the host Windows browser via WSLInterop**, completes OAuth; with Interop disabled, the printed-URL/device-code fallback completes login; the post-login token lands in the agent's own config directory (`~/.claude`, `~/.codex`, `~/.gemini/antigravity-cli`) |
 | 4.9 | **Done** | Dropped into the embedded terminal at **`~/workspaces/default/`**; terminal is interactive (keystroke echo, resize reflow, 256-color) |
 
 ---

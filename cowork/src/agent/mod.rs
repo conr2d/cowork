@@ -1,11 +1,11 @@
 //! Agent-install orchestration (WP7): the ordered sequence for the selected
 //! agents, emitting the guest→host JSON-lines protocol.
 //!
-//! For each agent the sequence is: install (hang-guarded) → verify the binary →
-//! route credentials. The first failure emits a structured `Error` envelope and
-//! stops. This mirrors [`crate::bootstrap`]: all decision logic is pure and
-//! unit-tested against a mock [`AgentOps`]; the real process/filesystem glue is
-//! [`LinuxAgentOps`].
+//! For each agent the sequence is: install (hang-guarded) → verify the binary.
+//! Agents keep their own default config paths inside the distro. The first
+//! failure emits a structured `Error` envelope and stops. This mirrors
+//! [`crate::bootstrap`]: all decision logic is pure and unit-tested against a
+//! mock [`AgentOps`]; the real process/filesystem glue is [`LinuxAgentOps`].
 
 mod command;
 mod ops;
@@ -81,7 +81,7 @@ fn install_one(
 ) -> Result<(), Envelope> {
     // 1. install (hang-guarded).
     progress(sink, &command::install_step(agent));
-    match ops.run_installer(&command::install_cmd(agent, home), INSTALL_TIMEOUT) {
+    match ops.run_installer(&command::install_cmd(agent), INSTALL_TIMEOUT) {
         InstallOutcome::Completed { exit_code: 0, .. } => {}
         InstallOutcome::Completed { exit_code, output } => {
             return Err(command::install_failed_envelope(agent, exit_code)
@@ -109,53 +109,6 @@ fn install_one(
         }
     }
 
-    // 3. route credentials into ~/.cowork/creds/<agent>.
-    progress(sink, &command::creds_step(agent));
-    route_creds(ops, agent, home)
-}
-
-fn route_creds(ops: &mut dyn AgentOps, agent: Agent, home: &str) -> Result<(), Envelope> {
-    let dir = command::creds_dir(agent, home);
-    if let Err(e) = ops.create_dir_all(&dir) {
-        return Err(command::internal_unknown_envelope(&format!(
-            "create {dir}: {e}"
-        )));
-    }
-
-    match command::creds_export_line(agent, home) {
-        // env-redirect agents (claude, codex): idempotent shellrc export.
-        Some(line) => ensure_shellrc_line(ops, home, &line),
-        // no env override (antigravity): symlink its config dir into the creds dir.
-        None => {
-            let parent = command::antigravity_link_parent(home);
-            if let Err(e) = ops.create_dir_all(&parent) {
-                return Err(command::internal_unknown_envelope(&format!(
-                    "create {parent}: {e}"
-                )));
-            }
-            let link = command::antigravity_link_path(home);
-            if let Err(e) = ops.symlink(&dir, &link) {
-                return Err(command::internal_unknown_envelope(&format!(
-                    "symlink {link}: {e}"
-                )));
-            }
-            Ok(())
-        }
-    }
-}
-
-/// Append `line` to `~/.bashrc` if an identical (trimmed) line is not present.
-fn ensure_shellrc_line(ops: &mut dyn AgentOps, home: &str, line: &str) -> Result<(), Envelope> {
-    let file = format!("{home}/.bashrc");
-    let existing = ops.read_to_string(&file).unwrap_or_default();
-    if existing.lines().any(|l| l.trim() == line) {
-        return Ok(());
-    }
-    if let Err(e) = ops.append_line(&file, line) {
-        return Err(command::internal_unknown_envelope(&format!(
-            "write {file}: {e}"
-        )));
-    }
     Ok(())
 }
 
@@ -212,12 +165,6 @@ mod tests {
         verify_fail: HashSet<String>,
         verify_launch_fail: HashSet<String>,
         missing_binary: HashSet<String>,
-        dir_fail: bool,
-        symlink_fail: bool,
-        append_fail: bool,
-        files: HashMap<String, String>,
-        dirs: Vec<String>,
-        symlinks: Vec<(String, String)>,
         installer_runs: Vec<Cmd>,
         checks: Vec<Cmd>,
     }
@@ -231,12 +178,6 @@ mod tests {
                 verify_fail: HashSet::new(),
                 verify_launch_fail: HashSet::new(),
                 missing_binary: HashSet::new(),
-                dir_fail: false,
-                symlink_fail: false,
-                append_fail: false,
-                files: HashMap::new(),
-                dirs: Vec::new(),
-                symlinks: Vec::new(),
                 installer_runs: Vec::new(),
                 checks: Vec::new(),
             }
@@ -292,38 +233,6 @@ mod tests {
             }
             self.installed.contains(path)
         }
-
-        fn read_to_string(&self, path: &str) -> Option<String> {
-            self.files.get(path).cloned()
-        }
-
-        fn append_line(&mut self, path: &str, line: &str) -> Result<(), String> {
-            if self.append_fail {
-                return Err("append denied".to_string());
-            }
-            let entry = self.files.entry(path.to_string()).or_default();
-            entry.push_str(line);
-            entry.push('\n');
-            Ok(())
-        }
-
-        fn create_dir_all(&mut self, path: &str) -> Result<(), String> {
-            if self.dir_fail {
-                Err("mkdir denied".to_string())
-            } else {
-                self.dirs.push(path.to_string());
-                Ok(())
-            }
-        }
-
-        fn symlink(&mut self, target: &str, link: &str) -> Result<(), String> {
-            if self.symlink_fail {
-                Err("symlink denied".to_string())
-            } else {
-                self.symlinks.push((target.to_string(), link.to_string()));
-                Ok(())
-            }
-        }
     }
 
     fn agent_from_install(cmd: &Cmd) -> Agent {
@@ -362,10 +271,6 @@ mod tests {
             .collect()
     }
 
-    fn shellrc() -> String {
-        "/home/u/.bashrc".to_string()
-    }
-
     fn assert_failed_with(out: AgentInstallOutcome, expected: cowork_errors::Code) {
         match out {
             AgentInstallOutcome::Failed(env) => assert_eq!(env.code, expected),
@@ -384,65 +289,8 @@ mod tests {
 
         assert_eq!(sink.events.first().map(|(t, _)| t.as_str()), Some("hello"));
         assert_eq!(sink.events.last().map(|(t, _)| t.as_str()), Some("done"));
-        assert_eq!(
-            steps(&sink),
-            vec!["install-claude", "verify-claude", "creds-claude"]
-        );
+        assert_eq!(steps(&sink), vec!["install-claude", "verify-claude"]);
         assert_eq!(ops.installer_runs.len(), 1);
-        assert!(
-            ops.dirs
-                .contains(&command::creds_dir(Agent::Claude, "/home/u"))
-        );
-        assert!(
-            ops.files
-                .get(&shellrc())
-                .unwrap()
-                .contains(r#"export CLAUDE_CONFIG_DIR="/home/u/.cowork/creds/claude""#)
-        );
-    }
-
-    #[test]
-    fn happy_path_codex_sets_codex_home_export() {
-        let mut ops = MockAgentOps::new();
-        ops.installed
-            .insert(command::bin_path(Agent::Codex, "/home/u"));
-        let mut sink = CollectingSink::default();
-        let out = run_agent_install(&mut ops, &mut sink, &config(vec![Agent::Codex]));
-        assert!(matches!(out, AgentInstallOutcome::Done));
-        assert!(
-            ops.files
-                .get(&shellrc())
-                .unwrap()
-                .contains(r#"export CODEX_HOME="/home/u/.cowork/creds/codex""#)
-        );
-    }
-
-    #[test]
-    fn antigravity_creates_symlink_not_export() {
-        let mut ops = MockAgentOps::new();
-        ops.installed
-            .insert(command::bin_path(Agent::Antigravity, "/home/u"));
-        let mut sink = CollectingSink::default();
-        let out = run_agent_install(&mut ops, &mut sink, &config(vec![Agent::Antigravity]));
-        assert!(matches!(out, AgentInstallOutcome::Done));
-        assert_eq!(
-            ops.symlinks,
-            vec![(
-                command::creds_dir(Agent::Antigravity, "/home/u"),
-                command::antigravity_link_path("/home/u")
-            )]
-        );
-        assert!(
-            ops.dirs
-                .contains(&command::antigravity_link_parent("/home/u"))
-        );
-        assert!(
-            !ops.files
-                .get(&shellrc())
-                .cloned()
-                .unwrap_or_default()
-                .contains("export")
-        );
     }
 
     #[test]
@@ -463,13 +311,10 @@ mod tests {
             vec![
                 "install-claude",
                 "verify-claude",
-                "creds-claude",
                 "install-codex",
                 "verify-codex",
-                "creds-codex",
                 "install-antigravity",
                 "verify-antigravity",
-                "creds-antigravity",
             ]
         );
     }
@@ -526,40 +371,5 @@ mod tests {
         let mut sink = CollectingSink::default();
         let out = run_agent_install(&mut ops, &mut sink, &config(vec![Agent::Claude]));
         assert_failed_with(out, cowork_errors::Code::AgentBinaryNotFound);
-    }
-
-    #[test]
-    fn creds_dir_failure_maps_to_internal_unknown() {
-        let mut ops = MockAgentOps::new();
-        ops.installed
-            .insert(command::bin_path(Agent::Claude, "/home/u"));
-        ops.dir_fail = true;
-        let mut sink = CollectingSink::default();
-        let out = run_agent_install(&mut ops, &mut sink, &config(vec![Agent::Claude]));
-        assert_failed_with(out, cowork_errors::Code::InternalUnknown);
-    }
-
-    #[test]
-    fn symlink_failure_maps_to_internal_unknown() {
-        let mut ops = MockAgentOps::new();
-        ops.installed
-            .insert(command::bin_path(Agent::Antigravity, "/home/u"));
-        ops.symlink_fail = true;
-        let mut sink = CollectingSink::default();
-        let out = run_agent_install(&mut ops, &mut sink, &config(vec![Agent::Antigravity]));
-        assert_failed_with(out, cowork_errors::Code::InternalUnknown);
-    }
-
-    #[test]
-    fn shellrc_export_idempotent() {
-        let mut ops = MockAgentOps::new();
-        ops.installed
-            .insert(command::bin_path(Agent::Claude, "/home/u"));
-        let existing = r#"export CLAUDE_CONFIG_DIR="/home/u/.cowork/creds/claude""#.to_string();
-        ops.files.insert(shellrc(), existing.clone());
-        let mut sink = CollectingSink::default();
-        let out = run_agent_install(&mut ops, &mut sink, &config(vec![Agent::Claude]));
-        assert!(matches!(out, AgentInstallOutcome::Done));
-        assert_eq!(ops.files.get(&shellrc()), Some(&existing));
     }
 }

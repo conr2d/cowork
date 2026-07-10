@@ -162,12 +162,12 @@ pub fn run_session_uuid(
     let cwd = workspace_cwd(home, slug);
     let uuid = match agent {
         Agent::Codex => codex_session_uuid(
-            Path::new(&command::creds_dir(Agent::Codex, home)),
+            Path::new(&command::config_dir(Agent::Codex, home)),
             &cwd,
             since_ms,
         ),
         Agent::Antigravity => agy_session_uuid(
-            Path::new(&format!("{home}/.gemini/antigravity-cli")),
+            Path::new(&command::config_dir(Agent::Antigravity, home)),
             &cwd,
             since_ms,
         ),

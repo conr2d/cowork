@@ -18,7 +18,7 @@ Windows host (Tauri v2 → Cowork.exe) — host driver:
 
 WSL guest (vanilla Ubuntu) — host-agnostic:
 ├── `cowork` CLI (Rust): apt prereqs → Linuxbrew → mise → Node (codex only) → agent install
-│      emits JSON-lines progress; owns ~/.default-npm-packages and ~/.cowork/creds routing
+│      emits JSON-lines progress; owns ~/.default-npm-packages
 └── agents: claude (native installer) · antigravity `agy` (native installer) · codex (npm via mise)
 ```
 
@@ -28,7 +28,7 @@ Naming: brand **Cowork**; GUI **Cowork.exe**; guest CLI **`cowork`**; future dae
 
 v0.1 Setup · v0.2 Isolation (bubblewrap) · v0.3 Recovery (snapshots) · v0.4 Community · v0.5 Observability + budget.
 
-**Do NOT** implement isolation, recovery, observability, budgets, community, or a credential vault in v0.1. Credentials are merely *routed* to `~/.cowork/creds` (not encrypted) to avoid breaking changes when v0.2/v0.3 land.
+**Do NOT** implement isolation, recovery, observability, budgets, community, or a credential vault in v0.1. Credentials stay at each agent's default path inside the distro, which is the isolation boundary; a credential vault remains out of scope.
 
 ## i18n & errors
 

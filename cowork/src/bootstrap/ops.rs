@@ -30,6 +30,9 @@ pub trait BootstrapOps {
     /// Append `line` (a trailing newline is added) to `path`, creating it if
     /// absent. `Err` carries a short diagnostic string.
     fn append_line(&mut self, path: &str, line: &str) -> Result<(), String>;
+    /// Overwrite `path` with `contents` (used to strip legacy activation lines).
+    /// `Err` carries a short diagnostic string.
+    fn write_file(&mut self, path: &str, contents: &str) -> Result<(), String>;
     /// Create `path` and all parents (idempotent, like `mkdir -p`). `Err` carries
     /// a short diagnostic string.
     fn create_dir_all(&mut self, path: &str) -> Result<(), String>;
@@ -75,6 +78,10 @@ impl BootstrapOps for LinuxOps {
             .open(path)
             .map_err(|e| e.to_string())?;
         writeln!(file, "{line}").map_err(|e| e.to_string())
+    }
+
+    fn write_file(&mut self, path: &str, contents: &str) -> Result<(), String> {
+        std::fs::write(path, contents).map_err(|e| e.to_string())
     }
 
     fn create_dir_all(&mut self, path: &str) -> Result<(), String> {

@@ -8,7 +8,7 @@ use cowork_errors::{Code, Envelope, Stage};
 
 use crate::cmd::Cmd;
 
-/// Homebrew's official default install prefix on Linux x86_64.
+/// Homebrew's official default install prefix on Linux.
 pub const BREW_PREFIX: &str = "/home/linuxbrew/.linuxbrew";
 /// Absolute path of the `brew` binary once installed; used as an idempotency probe.
 pub const BREW_BIN: &str = "/home/linuxbrew/.linuxbrew/bin/brew";
@@ -100,9 +100,9 @@ pub fn locale_gen_cmd() -> Cmd {
     }
 }
 
-/// `<home>/.bashrc` — the shellrc the activation lines are appended to.
-pub fn shellrc_path(home: &str) -> String {
-    format!("{home}/.bashrc")
+/// `<home>/.profile` — the login-shell profile the activation lines are appended to.
+pub fn profile_path(home: &str) -> String {
+    format!("{home}/.profile")
 }
 
 /// The default workspace directory created during bootstrap: `<home>/workspaces/default`.
@@ -113,13 +113,46 @@ pub fn workspace_path(home: &str) -> String {
     format!("{home}/workspaces/default")
 }
 
-/// The two PATH-activation lines appended to the shellrc (brew first, then mise).
-/// Each is matched verbatim for idempotency, so keep the exact text stable.
-pub fn shellrc_lines(home: &str) -> Vec<String> {
+/// The mise shims directory: `mise` writes a shim per installed tool here.
+/// Prefer this to `mise activate`, which is a *prompt hook* and therefore does
+/// nothing in a non-interactive shell.
+pub fn mise_shims_dir(home: &str) -> String {
+    format!("{home}/.local/share/mise/shims")
+}
+
+/// Toolchain activation appended to `~/.profile`.
+///
+/// It lives in `~/.profile`, not `~/.bashrc`: Ubuntu's stock `~/.bashrc` returns
+/// immediately when the shell is not interactive, and `~/.profile` sources it only
+/// after that guard — so `bash -lc` (sudo -i, headless wrappers) never reached the
+/// old lines and ran with a toolchain-free PATH.
+///
+/// POSIX sh only: dash reads `~/.profile` as well.
+///
+/// INVARIANT: a *non-login* shell (`bash -c`, `sh -c`) reads no startup file and
+/// inherits its parent's PATH. Anything that must be found by an arbitrary
+/// non-interactive shell belongs on the default PATH (`/usr/local/bin`), the way
+/// the injected guest binary already is — never behind a shell hook.
+pub fn profile_lines() -> Vec<String> {
+    vec![
+        format!(r#"[ -x {BREW_BIN} ] && eval "$({BREW_BIN} shellenv sh)""#),
+        r#"[ -d "$HOME/.local/share/mise/shims" ] && PATH="$HOME/.local/share/mise/shims:$PATH""#
+            .to_string(),
+    ]
+}
+
+/// The exact activation lines previous versions appended to `~/.bashrc`. Removed by
+/// the bootstrap so an upgraded distro does not carry a duplicate, dead activation.
+pub fn legacy_bashrc_lines(home: &str) -> Vec<String> {
     vec![
         format!(r#"eval "$({BREW_PREFIX}/bin/brew shellenv)""#),
         format!(r#"eval "$({home}/.local/bin/mise activate bash)""#),
     ]
+}
+
+/// `~/.bashrc` — only used now to strip [`legacy_bashrc_lines`].
+pub fn bashrc_path(home: &str) -> String {
+    format!("{home}/.bashrc")
 }
 
 /// `set -o pipefail; curl … | <runner>` — a curl-pipe-shell installer that fails
@@ -148,9 +181,9 @@ pub fn mise_install_failed_envelope(exit_code: i32) -> Envelope {
         .with_context("exitCode", exit_code.to_string())
 }
 
-/// `toolchain.shellrc_write_failed` (Internal).
-pub fn shellrc_write_failed_envelope(file: &str) -> Envelope {
-    Envelope::new(Code::ToolchainShellrcWriteFailed, Stage::Toolchain).with_context("file", file)
+/// `toolchain.profile_write_failed` (Internal).
+pub fn profile_write_failed_envelope(file: &str) -> Envelope {
+    Envelope::new(Code::ToolchainProfileWriteFailed, Stage::Toolchain).with_context("file", file)
 }
 
 /// `internal.unknown` (Internal) — used for the locale-gen and workspace steps,
@@ -215,17 +248,38 @@ mod tests {
     }
 
     #[test]
-    fn shellrc_lines_are_brew_then_mise_with_home() {
-        let lines = shellrc_lines("/home/u");
+    fn profile_lines_are_brew_then_mise_shims() {
+        let lines = profile_lines();
         assert_eq!(lines.len(), 2);
-        assert!(lines[0].contains("/home/linuxbrew/.linuxbrew/bin/brew shellenv"));
-        assert!(lines[1].contains("/home/u/.local/bin/mise activate bash"));
+        assert!(lines[0].contains("/home/linuxbrew/.linuxbrew/bin/brew shellenv sh"));
+        assert!(lines[1].contains("$HOME/.local/share/mise/shims"));
+        assert!(!lines.join("\n").contains("mise activate"));
+    }
+
+    #[test]
+    fn profile_mise_line_matches_the_shims_dir_the_bootstrap_creates() {
+        // The profile line spells the path with a shell-runtime `$HOME`; this ties it
+        // to `mise_shims_dir`, which the bootstrap mkdir's, so the two cannot drift.
+        assert!(profile_lines()[1].contains(&mise_shims_dir("$HOME")));
+    }
+
+    #[test]
+    fn legacy_bashrc_lines_are_exact_old_strings() {
+        assert_eq!(
+            legacy_bashrc_lines("/home/u"),
+            vec![
+                r#"eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)""#.to_string(),
+                r#"eval "$(/home/u/.local/bin/mise activate bash)""#.to_string(),
+            ]
+        );
     }
 
     #[test]
     fn paths_are_home_relative() {
         assert_eq!(mise_bin("/home/u"), "/home/u/.local/bin/mise");
-        assert_eq!(shellrc_path("/home/u"), "/home/u/.bashrc");
+        assert_eq!(mise_shims_dir("/home/u"), "/home/u/.local/share/mise/shims");
+        assert_eq!(profile_path("/home/u"), "/home/u/.profile");
+        assert_eq!(bashrc_path("/home/u"), "/home/u/.bashrc");
         assert_eq!(workspace_path("/home/u"), "/home/u/workspaces/default");
     }
 
@@ -254,12 +308,12 @@ mod tests {
     }
 
     #[test]
-    fn shellrc_envelope_carries_file() {
-        let e = shellrc_write_failed_envelope("/home/u/.bashrc");
-        assert_eq!(e.code, Code::ToolchainShellrcWriteFailed);
+    fn profile_envelope_carries_file() {
+        let e = profile_write_failed_envelope("/home/u/.profile");
+        assert_eq!(e.code, Code::ToolchainProfileWriteFailed);
         assert_eq!(
             e.context.get("file").map(String::as_str),
-            Some("/home/u/.bashrc")
+            Some("/home/u/.profile")
         );
     }
 

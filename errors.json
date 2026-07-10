@@ -40,7 +40,7 @@
 		"toolchain.brew_install_failed": { "kind": "Transient", "contextKeys": ["exitCode"] },
 		"toolchain.mise_install_failed": { "kind": "Transient", "contextKeys": ["exitCode"] },
 		"toolchain.node_install_failed": { "kind": "Transient", "contextKeys": ["version", "exitCode"] },
-		"toolchain.shellrc_write_failed": { "kind": "Internal", "contextKeys": ["file"] },
+		"toolchain.profile_write_failed": { "kind": "Internal", "contextKeys": ["file"] },
 
 		"agent.install_failed": { "kind": "Transient", "contextKeys": ["agent", "exitCode"] },
 		"agent.installer_download_failed": { "kind": "Transient", "contextKeys": ["agent", "url", "httpStatus"] },

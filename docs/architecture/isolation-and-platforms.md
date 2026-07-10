@@ -3,7 +3,7 @@
 **Status:** accepted (design), 2026-07-10; D4 and §7 revised the same day. Supersedes the
 implicit isolation claim of v0.1.
 **Scope:** what Cowork isolates, how, and what that implies for macOS. Feeds the v0.3
-Isolation work package. Nothing here is implemented yet.
+Isolation work package. Nothing here is implemented yet, except §9.
 
 ---
 
@@ -282,7 +282,6 @@ Each is stated so a result decides something.
 | **S4** | Cold-boot time of Lima + our rootfs on Apple silicon | D6: lazy start vs start-at-login default |
 | **S5** | Snapshot latency of `git add -A` over a realistic workspace | Whether the checkpoint trigger needs debouncing |
 | **S6** | `brew install poppler pandoc` on aarch64 Ubuntu 24.04 — bottles, or source builds? | Confirms §5/§6 |
-| **S7** | Reproduce the mise/`.bashrc` defect (§9) in the distro: which caller actually gets an empty PATH? | The shape of the fix |
 | **S8** | For each agent, does Enter send the message or insert a newline? | Accuracy of the §7 checkpoint trigger |
 | **S9** | Lima `vzNAT` + guest `smbd` on 445 + `NetFSMountURLSync` with a Keychain credential — mounts with no prompt? | Whether D4's macOS half stands |
 | **S10** | After the VM dies unexpectedly, what cleans up the stale `/Volumes/Cowork` mount? | D4 operational cost |
@@ -290,11 +289,13 @@ Each is stated so a result decides something.
 S3 (whether a single host directory can be drvfs-mounted with `automount=false`) was dropped:
 D4 mounts no host directory into the environment.
 
+S7 was resolved; §9 records the reproduced shell-startup behavior and the resulting fix.
+
 ---
 
-## 9. Known defect: shell activation
+## 9. Resolved: profile activation
 
-`cowork/src/bootstrap/command.rs:118` appends two activation lines to `~/.bashrc`:
+Older bootstraps appended two activation lines to `~/.bashrc`:
 
 ```
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
@@ -314,16 +315,34 @@ so a non-interactive shell never reaches either line — and does not read `.bas
 the first place. Both brew and mise are affected; this is not a mise bug, it is the
 activation pattern.
 
-It is masked today because the embedded terminal spawns `bash -li` and children inherit the
-exported `PATH`. It breaks for shells that are not descendants of that login shell:
-`wsl.exe -d Cowork -- bash -c …` (our own `run_guest` path), headless `codex exec`, cron.
+Measured on Ubuntu by appending a marker line to each file and running
+`env -i HOME=… <invocation>`:
+
+| invocation | marker in `~/.bashrc` | marker in `~/.profile` |
+|---|---|---|
+| `bash -li` (our PTY) | reached | reached |
+| `bash -lc` (headless wrappers) | **MISSING** | reached |
+| `sh -lc` (dash) | **MISSING** | reached |
+| `bash -c` / `sh -c` | MISSING | MISSING |
+
+The fix is to append toolchain activation to `~/.profile`, after Ubuntu's existing
+`~/.local/bin` PATH block, so every login shell sees Homebrew and mise. The block is POSIX
+`sh`: Homebrew is loaded with `brew shellenv sh`, and mise contributes its shims directory
+instead of `mise activate`, which is a prompt hook and does nothing useful outside an
+interactive shell.
 
 The invariant to adopt: **anything an arbitrary non-interactive shell must find belongs on
 the default `PATH` (`/usr/local/bin`), not behind a shell hook** — the rule the injected guest
-binary already follows. Candidate fixes, to be settled by S7: move activation to
-`/etc/profile.d/cowork.sh`, use `mise activate --shims` (mise's own recommendation for
-non-interactive contexts), and/or symlink shims into `/usr/local/bin`. Note `sh -c` (dash)
-ignores `BASH_ENV`, so a PATH entry alone is not sufficient in the general case.
+binary already follows. Non-login shells (`bash -c`, `sh -c`) still read no startup file and
+inherit `PATH` from their parent; that behavior is correct and remains out of scope for
+profile activation.
+
+**The same pattern survives one place more.** `cowork/src/agent/mod.rs::ensure_shellrc_line`
+appends `export CLAUDE_CONFIG_DIR=…` / `export CODEX_HOME=…` to `~/.bashrc`, so credential
+routing has only ever taken effect in an interactive shell either. It is left alone here
+because the credentials-at-default-paths change deletes that code outright — see the
+`~/.cowork/creds` decision. If that change is ever abandoned, this line moves to
+`~/.profile` too.
 
 ---
 

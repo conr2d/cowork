@@ -121,16 +121,15 @@ jobs:
         run: |
           sudo -u cowork -i cowork bootstrap
           sudo -u cowork -i cowork agent-install --agent claude
-      # Assert by absolute path (a non-interactive shell returns early from the
-      # default ~/.bashrc, so brew/mise are not on PATH here — that is expected;
-      # the real terminal is interactive).
+      # Toolchain activation lives in ~/.profile, so a login shell — interactive
+      # or not — has brew and mise on PATH.
       - name: Assert the happy path
         run: |
           sudo -u cowork -i bash -c '
             set -euo pipefail
             test -d "$HOME/workspaces/default"
-            test -x /home/linuxbrew/.linuxbrew/bin/brew
-            test -x "$HOME/.local/bin/mise"
+            command -v brew
+            command -v mise
             test -x "$HOME/.local/bin/claude"
             grep -q CLAUDE_CONFIG_DIR "$HOME/.bashrc"
           '

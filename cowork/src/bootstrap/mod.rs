@@ -1,11 +1,13 @@
 //! Toolchain bootstrap orchestration (WP6): the ordered sequence of setup steps
 //! run inside the `Cowork` distro, emitting the guest→host JSON-lines protocol.
 //!
-//! The sequence is: apt prerequisites → Linuxbrew → mise → shellrc activation →
+//! The sequence is: apt prerequisites → Linuxbrew → mise → profile activation →
 //! locales → default workspace. Each step emits a `Progress` first; on failure
 //! the step emits a structured `Error` envelope and the run stops. brew/mise
-//! installs are skipped when already present, and the shellrc lines are appended
-//! only when absent, so a re-run is idempotent.
+//! installs are skipped when already present, and the profile lines are appended
+//! only when absent, so a re-run is idempotent. Activation lives in `~/.profile`,
+//! not `~/.bashrc`, because Ubuntu's default `.bashrc` returns immediately in
+//! non-interactive login shells.
 //!
 //! mise is installed but no runtime is pinned: it is the user's own
 //! workspace-scoped runtime manager (`mise use node/python`), not an agent
@@ -132,10 +134,17 @@ fn run_steps(
             ));
         }
     }
+    // mise creates shims lazily on first tool install. Creating the directory
+    // now makes the ~/.profile guard pass from the first login, so later shims
+    // appear inside a directory that is already on PATH.
+    let shims_dir = command::mise_shims_dir(&config.home);
+    if let Err(e) = ops.create_dir_all(&shims_dir) {
+        return Err(command::profile_write_failed_envelope(&shims_dir).with_cause(&e));
+    }
 
-    // 4. shellrc activation lines (idempotent append).
+    // 4. profile activation lines (idempotent append).
     progress(sink, command::step::SHELLRC);
-    ensure_shellrc(ops, &config.home)?;
+    ensure_profile(ops, &config.home)?;
 
     // 5. locales (no dedicated code → internal.unknown).
     progress(sink, command::step::LOCALES);
@@ -157,17 +166,40 @@ fn run_steps(
     Ok(())
 }
 
-/// Append each shellrc activation line that is not already present.
-fn ensure_shellrc(ops: &mut dyn BootstrapOps, home: &str) -> Result<(), Envelope> {
-    let file = command::shellrc_path(home);
+/// Append each activation line that is not already present, then strip the
+/// activation lines older versions wrote to `~/.bashrc` (they are dead there —
+/// see `command::profile_lines` — and would double the PATH entries).
+fn ensure_profile(ops: &mut dyn BootstrapOps, home: &str) -> Result<(), Envelope> {
+    let file = command::profile_path(home);
     let existing = ops.read_to_string(&file).unwrap_or_default();
-    for line in command::shellrc_lines(home) {
+    for line in command::profile_lines() {
         if existing.lines().any(|l| l.trim() == line) {
             continue;
         }
         if let Err(e) = ops.append_line(&file, &line) {
-            return Err(command::shellrc_write_failed_envelope(&file).with_cause(&e));
+            return Err(command::profile_write_failed_envelope(&file).with_cause(&e));
         }
+    }
+
+    let bashrc = command::bashrc_path(home);
+    let Some(existing_bashrc) = ops.read_to_string(&bashrc) else {
+        return Ok(());
+    };
+    let legacy = command::legacy_bashrc_lines(home);
+    let kept: Vec<&str> = existing_bashrc
+        .lines()
+        .filter(|line| !legacy.iter().any(|old| line.trim() == old))
+        .collect();
+    if kept.len() == existing_bashrc.lines().count() {
+        return Ok(());
+    }
+    let rewritten = if kept.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", kept.join("\n"))
+    };
+    if let Err(e) = ops.write_file(&bashrc, &rewritten) {
+        return Err(command::profile_write_failed_envelope(&bashrc).with_cause(&e));
     }
     Ok(())
 }
@@ -242,8 +274,11 @@ mod tests {
         files: HashMap<String, String>,
         fail: HashMap<String, i32>,
         append_fail: bool,
-        dir_fail: bool,
+        write_fail: bool,
+        dir_fail_paths: HashSet<String>,
         runs: Vec<Cmd>,
+        writes: Vec<String>,
+        dirs: Vec<String>,
     }
 
     impl MockOps {
@@ -253,8 +288,11 @@ mod tests {
                 files: HashMap::new(),
                 fail: HashMap::new(),
                 append_fail: false,
-                dir_fail: false,
+                write_fail: false,
+                dir_fail_paths: HashSet::new(),
                 runs: Vec::new(),
+                writes: Vec::new(),
+                dirs: Vec::new(),
             }
         }
 
@@ -326,8 +364,18 @@ mod tests {
             Ok(())
         }
 
-        fn create_dir_all(&mut self, _path: &str) -> Result<(), String> {
-            if self.dir_fail {
+        fn write_file(&mut self, path: &str, contents: &str) -> Result<(), String> {
+            if self.write_fail {
+                return Err("write denied".to_string());
+            }
+            self.writes.push(path.to_string());
+            self.files.insert(path.to_string(), contents.to_string());
+            Ok(())
+        }
+
+        fn create_dir_all(&mut self, path: &str) -> Result<(), String> {
+            self.dirs.push(path.to_string());
+            if self.dir_fail_paths.contains(path) {
                 Err("mkdir denied".to_string())
             } else {
                 Ok(())
@@ -391,34 +439,85 @@ mod tests {
     }
 
     #[test]
-    fn shellrc_not_duplicated_when_lines_present() {
+    fn profile_not_duplicated_when_lines_present() {
         let mut ops = MockOps::new();
-        let existing = command::shellrc_lines("/home/u").join("\n");
+        let existing = command::profile_lines().join("\n");
         ops.files
-            .insert(command::shellrc_path("/home/u"), existing.clone());
+            .insert(command::profile_path("/home/u"), existing.clone());
         let mut sink = CollectingSink::default();
         let out = run_bootstrap(&mut ops, &mut sink, &config());
         assert!(matches!(out, BootstrapOutcome::Done));
         // No new lines appended: the file is byte-for-byte the seeded content.
         assert_eq!(
-            ops.files.get(&command::shellrc_path("/home/u")),
+            ops.files.get(&command::profile_path("/home/u")),
             Some(&existing)
         );
     }
 
     #[test]
-    fn shellrc_appends_both_lines_when_absent() {
+    fn profile_appends_both_lines_when_absent() {
         let mut ops = MockOps::new();
         let mut sink = CollectingSink::default();
         run_bootstrap(&mut ops, &mut sink, &config());
         let content = ops
             .files
-            .get(&command::shellrc_path("/home/u"))
+            .get(&command::profile_path("/home/u"))
             .cloned()
             .unwrap_or_default();
-        for line in command::shellrc_lines("/home/u") {
-            assert!(content.contains(&line), "missing shellrc line: {line}");
+        for line in command::profile_lines() {
+            assert!(content.contains(&line), "missing profile line: {line}");
         }
+    }
+
+    #[test]
+    fn mise_shims_dir_is_created_after_mise_step() {
+        let mut ops = MockOps::new();
+        let mut sink = CollectingSink::default();
+        let out = run_bootstrap(&mut ops, &mut sink, &config());
+        assert!(matches!(out, BootstrapOutcome::Done));
+        assert!(
+            ops.dirs
+                .iter()
+                .any(|dir| dir == &command::mise_shims_dir("/home/u"))
+        );
+    }
+
+    #[test]
+    fn legacy_bashrc_lines_are_removed_and_other_lines_preserved() {
+        let mut ops = MockOps::new();
+        let bashrc = command::bashrc_path("/home/u");
+        ops.files.insert(
+            bashrc.clone(),
+            format!(
+                "keep before\n{}\n{}\nkeep after\n",
+                command::legacy_bashrc_lines("/home/u")[0],
+                command::legacy_bashrc_lines("/home/u")[1]
+            ),
+        );
+        let mut sink = CollectingSink::default();
+        let out = run_bootstrap(&mut ops, &mut sink, &config());
+        assert!(matches!(out, BootstrapOutcome::Done));
+        assert_eq!(
+            ops.files.get(&bashrc).map(String::as_str),
+            Some("keep before\nkeep after\n")
+        );
+        assert_eq!(ops.writes, vec![bashrc]);
+    }
+
+    #[test]
+    fn bashrc_without_legacy_lines_is_not_written() {
+        let mut ops = MockOps::new();
+        let bashrc = command::bashrc_path("/home/u");
+        ops.files
+            .insert(bashrc.clone(), "keep before\nkeep after\n".to_string());
+        let mut sink = CollectingSink::default();
+        let out = run_bootstrap(&mut ops, &mut sink, &config());
+        assert!(matches!(out, BootstrapOutcome::Done));
+        assert!(ops.writes.is_empty());
+        assert_eq!(
+            ops.files.get(&bashrc).map(String::as_str),
+            Some("keep before\nkeep after\n")
+        );
     }
 
     fn assert_failed_with(out: BootstrapOutcome, expected: cowork_errors::Code) {
@@ -467,12 +566,36 @@ mod tests {
     }
 
     #[test]
-    fn shellrc_append_failure_maps_to_shellrc_code() {
+    fn profile_append_failure_maps_to_profile_code() {
         let mut ops = MockOps::new();
         ops.append_fail = true;
         let mut sink = CollectingSink::default();
         let out = run_bootstrap(&mut ops, &mut sink, &config());
-        assert_failed_with(out, cowork_errors::Code::ToolchainShellrcWriteFailed);
+        assert_failed_with(out, cowork_errors::Code::ToolchainProfileWriteFailed);
+    }
+
+    #[test]
+    fn bashrc_write_failure_maps_to_profile_code() {
+        let mut ops = MockOps::new();
+        let bashrc = command::bashrc_path("/home/u");
+        ops.files.insert(
+            bashrc,
+            format!("{}\n", command::legacy_bashrc_lines("/home/u")[0]),
+        );
+        ops.write_fail = true;
+        let mut sink = CollectingSink::default();
+        let out = run_bootstrap(&mut ops, &mut sink, &config());
+        assert_failed_with(out, cowork_errors::Code::ToolchainProfileWriteFailed);
+    }
+
+    #[test]
+    fn mise_shims_dir_failure_maps_to_profile_code() {
+        let mut ops = MockOps::new();
+        ops.dir_fail_paths
+            .insert(command::mise_shims_dir("/home/u"));
+        let mut sink = CollectingSink::default();
+        let out = run_bootstrap(&mut ops, &mut sink, &config());
+        assert_failed_with(out, cowork_errors::Code::ToolchainProfileWriteFailed);
     }
 
     #[test]
@@ -487,7 +610,8 @@ mod tests {
     #[test]
     fn workspace_failure_maps_to_internal_unknown() {
         let mut ops = MockOps::new();
-        ops.dir_fail = true;
+        ops.dir_fail_paths
+            .insert(command::workspace_path("/home/u"));
         let mut sink = CollectingSink::default();
         let out = run_bootstrap(&mut ops, &mut sink, &config());
         assert_failed_with(out, cowork_errors::Code::InternalUnknown);

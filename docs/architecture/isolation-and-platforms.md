@@ -1,6 +1,7 @@
 # Isolation and platforms
 
-**Status:** accepted (design), 2026-07-10. Supersedes the implicit isolation claim of v0.1.
+**Status:** accepted (design), 2026-07-10; D4 and §7 revised the same day. Supersedes the
+implicit isolation claim of v0.1.
 **Scope:** what Cowork isolates, how, and what that implies for macOS. Feeds the v0.3
 Isolation work package. Nothing here is implemented yet.
 
@@ -77,8 +78,10 @@ supports, and Seatbelt is not going away (Chrome depends on it). It was still re
 4. **Homebrew cannot work**: writes outside the container are denied and brew's bottle
    prefix is fixed at `/opt/homebrew`.
 
-**What we keep from it:** security-scoped bookmarks are the right way to express B1 on
-macOS. They govern *what the VM may see of the host*, and are used inside the VM model.
+**What we keep from it:** nothing, in the end. Security-scoped bookmarks looked like the
+right way to express B1 on macOS — they would govern what the VM may see of the host. D4
+removes the need: the VM is given **no host filesystem at all**, so there is nothing to
+scope. The bookmark idea is recorded here only so it is not rediscovered as an oversight.
 
 ### D3 — Rejected: Apple `container`
 
@@ -86,41 +89,59 @@ Per-container VMs give strong isolation and fast cold start, but require macOS 2
 silicon, and would make B2 a VM boundary on macOS while it stays bubblewrap on Windows.
 Two isolation designs is the outcome we are trying to avoid.
 
-### D4 — File model: workspace inside, `files/` bound from the host
+### D4 — File model: everything lives in the environment; the host browses it
 
 ```
-~/workspaces/<slug>/          # in the distro / VM disk — the agent's work tree
+~/workspaces/<slug>/          # in the distro / VM disk, on ext4 — the agent's work tree
   AGENTS.md, CLAUDE.md        # preset instructions (v0.2)
-  files/                      # bind of the host's ~/Cowork/<slug>
+  files/                      # what the user drags in and takes out
 ```
 
-Rationale is performance, and it is the whole of the performance story:
+**No host filesystem is ever mounted into the environment.** The agent has zero writable host
+paths. The exposure runs the other way: the host — a trusted party — mounts the guest for
+browsing.
 
-| path | mechanism | cost vs native |
+| platform | reverse mount | provided by |
 |---|---|---|
-| workspace root | ext4 on the VM/WSL disk (virtioblk) | ~2–3× |
-| `files/` | virtiofs (macOS) / drvfs (Windows) | ~6–9× |
+| Windows | `\\wsl.localhost\Cowork\…` (9p) | WSL, free |
+| macOS | `smb://<guest>/cowork` via a `smbd` in the guest | us |
 
-(Numbers from the [apple/container maintainers](https://github.com/apple/container/discussions/1516);
+The mechanisms differ; the model does not. Neither the user, the guest CLI, nor the L3
+sandbox policy can tell them apart. That asymmetry is far cheaper than letting the file
+*layout* differ per platform.
+
+Performance falls out correctly. The agent's heavy I/O — greps, builds, `git status` — is
+local ext4. The network share is traversed only when a human drags a file in Finder or
+Explorer, where latency is irrelevant. The numbers that would have mattered under a
+bind-mount design ([virtioblk ~2–3× native, virtiofs a further ~3× on top of
+that](https://github.com/apple/container/discussions/1516)) never enter the agent's path.
 CPU overhead on `Virtualization.framework` with an arm64 guest is under ~5% and is not a
-consideration.)
+consideration.
 
-The agent's heavy I/O — greps, builds, `git status` — happens on the fast path. The slow
-path carries the documents a user drags in and the artefacts they take out, where a 6× cost
-on a handful of files is invisible. Workspace instruction templates must state the
-convention: *work in the workspace root; read inputs from and write deliverables to `files/`.*
+macOS specifics (see S9): Lima's `vzNAT` gives the guest a host-reachable IP
+[without `socket_vmnet`, a sudoers entry, or a root helper](https://lima-vm.io/docs/config/network/vmnet/),
+so `smbd` binds port 445 directly. That matters: Finder handles `smb://host:port`
+[poorly](https://discussions.apple.com/thread/553264), so a port-forwarding design would have
+died here. A random password is minted at provisioning and stored in the host Keychain;
+the app mounts via `NetFSMountURLSync` with no prompt (never `mount_smbfs` with the password
+in `argv` — it appears in `ps`). `smbd` binds the `vzNAT` interface only; a share reachable
+from the LAN is an incident.
 
-This also replaces `\\wsl.localhost` (`cowork-host/src/workspace/mod.rs::files_unc_path`).
-On Windows, `automount=false` kills `/mnt/c` and we mount **only** `C:\Users\<u>\Cowork\<slug>`
-onto `files/` via drvfs. The Explorer / Finder button then opens a native host path. Both
-platforms get the same file model, and the host surface exposed to an agent shrinks to
-exactly the folder the user puts files in.
+Rejected alternatives for the macOS reverse mount: **NFS** (no authentication, so host-only
+binding is mandatory; uid mapping is messy; wants a privileged port), **File Provider
+Extension** (Apple's native answer and the prettiest Finder integration, but enumeration,
+transfer and conflict handling are weeks of work), **FUSE-T / macFUSE** (third-party
+dependency). Samba is the balance point.
+
+This supersedes `\\wsl.localhost` only as a *concept name*: on Windows it remains exactly the
+mechanism, and `cowork-host/src/workspace/mod.rs::files_unc_path` stays. On Windows,
+`automount=false` simply kills `/mnt/c` outright — nothing needs to be mounted back.
 
 ### D5 — Hardening ladder
 
 | | Change | Residual risk / what breaks |
 |---|---|---|
-| **L1** | `wsl.conf`: `[automount] enabled=false`, `[interop] enabled=false, appendWindowsPath=false` (Lima: no host mounts beyond `files/`) | With sudo, `mount -t drvfs` re-mounts `C:`. **`interop=false` breaks the agents' automatic browser launch for OAuth.** |
+| **L1** | `wsl.conf`: `[automount] enabled=false`, `[interop] enabled=false, appendWindowsPath=false` (Lima: no host mounts at all) | With sudo, `mount -t drvfs` re-mounts `C:`. **`interop=false` breaks the agents' automatic browser launch for OAuth.** |
 | **L2** | Drop `/etc/sudoers.d/cowork` after provisioning; installs run as root at provision time | brew and mise self-update still work (they own their prefixes); `apt` becomes app-mediated |
 | **L3** | bubblewrap per session: workspace RW, that agent's config dir RW, toolchain RO, rest of `$HOME` invisible, private `/tmp` | Network stays open (§2). Agents that apply their own sandbox nest a second one. |
 
@@ -186,10 +207,45 @@ history, and L3 hides the git-dir from the sandbox entirely. Because the git-dir
 `.git/info/exclude` carries `node_modules/`, `target/`, `.venv/` without touching the user's
 tree.
 
-**Trigger.** The working→idle transition already implemented in
-`src/lib/shell/sessions.svelte.ts` (output quiet for `WORKING_QUIET_MS`) is our only
-available approximation of an agent turn boundary — we host the agent's TUI and cannot see
-its turns. Also on session close and app quit. A no-change snapshot is skipped.
+**A checkpoint is the state immediately before the user sends the agent a new instruction.**
+
+Not "whenever output goes quiet". A timestamped list of quiet moments is unusable: those are
+our internal events, not events the user remembers. The one moment a user *can* place is
+"before I asked it to do that", so undo means *go back to before this instruction* — and one
+instruction yields exactly one checkpoint, instead of one per lull in the agent's output.
+
+We already own that moment. `Terminal.svelte` proxies every keystroke through
+`term.onData(… invoke('pty_write') …)`, so the user pressing Enter on a new instruction
+passes through our code. The working→idle transition in `src/lib/shell/sessions.svelte.ts`
+(output quiet for `WORKING_QUIET_MS`) remains as the **fallback** for an agent running long
+without user input. Also on session close and app quit. A no-change snapshot is skipped.
+
+Whether Enter means *send* or *newline* differs per agent — spike S8. That accuracy is what
+the trigger rests on.
+
+**The user never picks from a list of checkpoints.** Two surfaces, in this order:
+
+- **L0 — Undo / Redo.** No list. One press goes back one checkpoint, another goes back
+  further. It is `Cmd+Z`, the only undo a non-developer already knows. This covers the
+  common case ("cancel what it just did") and asks the user to choose nothing.
+- **L1 — per-file previous versions.** The accident a user actually suffers is *"this file is
+  ruined"*, not *"something went wrong at some time"*. Right-click a file → previous versions
+  by time. The selection is made by **looking, not by reading a label**, which is why Time
+  Machine, Dropbox and Google Docs version history work at all. It is nearly free for us:
+  extract the old blob to a temp path and hand it to `tauri-plugin-opener`, which opens it in
+  the host's default application. No viewer to build.
+- **L2 — a workspace-wide checkpoint list.** Probably never. Decide only after L0 and L1 are
+  in use and we can see what they fail to cover.
+
+**Labels.** L0 and L1 need only a timestamp; the preview does the label's job. If L2 ever
+happens, three ways to name a checkpoint, none free: buffering keystrokes until Enter
+(vendor-neutral, but TUI line editing, paste, and per-agent send keys make it fragile);
+parsing the agent's own session file (we already read those for session-uuid capture, so the
+schema-drift risk is one we accept — but reading the user's prose is a deeper reach);
+generating a summary with a headless agent call (robust, but latency, tokens, and a
+credential dependency for a background task). Whichever is chosen, a pasted secret must never
+land in a commit message inside `~/.cowork/history/<slug>.git` — store labels in a sidecar,
+truncated.
 
 **Rejected: instructing the agent to commit.** It is cheaper and it is wrong. Undo exists for
 when the agent misbehaves, and an agent that is misbehaving is the least likely to honour
@@ -205,8 +261,10 @@ commands scroll past in the terminal, which defeats the requirement outright.
    possible outcome for this user.
 2. **Nothing the user put in `files/` is ever removed.** Invariant 1 already guarantees it.
 
-With those two, whether `files/` is inside the snapshot becomes a pure performance question
-(few documents: include; large media: exclude), decidable later — spike S5.
+`files/` is inside the snapshot. D4 puts it on guest ext4, so snapshotting it is cheap and
+per-file version history applies uniformly across the workspace — which matters, because the
+file a user wants restored is usually a deliverable, and deliverables live in `files/`. Under
+the superseded bind-mount design this was an open trade-off; it no longer is.
 
 Nested repositories the user clones into a workspace are recorded as gitlinks and their
 contents are not snapshotted. They carry their own history. Accepted.
@@ -221,11 +279,16 @@ Each is stated so a result decides something.
 |---|---|---|
 | **S1** | With `interop=false`, do claude / codex / agy print the OAuth URL to stdout? | Whether L1 ships, or whether we need a host-side browser bridge |
 | **S2** | Does Ubuntu 24.04's `kernel.apparmor_restrict_unprivileged_userns` block bubblewrap inside the WSL2 kernel? Does an agent's own sandbox nest inside ours? | Whether L3 is bubblewrap or something else |
-| **S3** | With `automount=false`, can a single host directory still be mounted via `mount -t drvfs`? | Whether D4 works on Windows |
 | **S4** | Cold-boot time of Lima + our rootfs on Apple silicon | D6: lazy start vs start-at-login default |
-| **S5** | Snapshot latency of `git add -A` over a realistic workspace, with and without `files/` on the slow path | §7 scope |
+| **S5** | Snapshot latency of `git add -A` over a realistic workspace | Whether the checkpoint trigger needs debouncing |
 | **S6** | `brew install poppler pandoc` on aarch64 Ubuntu 24.04 — bottles, or source builds? | Confirms §5/§6 |
 | **S7** | Reproduce the mise/`.bashrc` defect (§9) in the distro: which caller actually gets an empty PATH? | The shape of the fix |
+| **S8** | For each agent, does Enter send the message or insert a newline? | Accuracy of the §7 checkpoint trigger |
+| **S9** | Lima `vzNAT` + guest `smbd` on 445 + `NetFSMountURLSync` with a Keychain credential — mounts with no prompt? | Whether D4's macOS half stands |
+| **S10** | After the VM dies unexpectedly, what cleans up the stale `/Volumes/Cowork` mount? | D4 operational cost |
+
+S3 (whether a single host directory can be drvfs-mounted with `automount=false`) was dropped:
+D4 mounts no host directory into the environment.
 
 ---
 

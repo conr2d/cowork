@@ -47,6 +47,14 @@ jobs:
       # and unit-tested here. The cfg(windows) probe is compiled on the host job.
       - run: cargo clippy -p cowork-host --all-targets -- -D warnings
       - run: cargo test -p cowork-host
+      # A Linux clippy/test of cowork-host never type-checks its cfg(windows)
+      # modules, so a rename or deletion elsewhere in the crate can leave them
+      # dangling and green — that shipped once (a deleted `auth` module still
+      # imported by `session::windows_session`), caught only by the windows job.
+      # `cargo check` for the windows target does not link, so it needs no mingw
+      # and costs seconds.
+      - run: rustup target add x86_64-pc-windows-gnu
+      - run: cargo check -p cowork-host --target x86_64-pc-windows-gnu
 
   # Conformance gates (the unit-seal gate). WP0: host/guest separation.
   # WP2 adds the errors.json single-source + 3-locale parity check here.

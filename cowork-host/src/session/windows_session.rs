@@ -1,11 +1,10 @@
 use cowork_errors::{Envelope, Stage};
 
-use crate::auth::validate_agent;
 use crate::provision::run_guest_events;
 
 use super::{
     agent_theme_args, classify_agent_theme, classify_session_uuid, session_uuid_args,
-    validate_theme,
+    validate_agent, validate_theme,
 };
 
 pub fn capture_session_uuid(

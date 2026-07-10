@@ -1,8 +1,8 @@
 use cowork_errors::{Code, Envelope, Stage};
 use cowork_host::protocol::HostEvent;
 use cowork_host::session::{
-    agent_theme_args, classify_agent_theme, classify_session_uuid, session_uuid_args,
-    validate_theme,
+    KNOWN_AGENTS, agent_theme_args, classify_agent_theme, classify_session_uuid, session_uuid_args,
+    validate_agent, validate_theme,
 };
 
 fn session_uuid(uuid: Option<&str>) -> HostEvent {
@@ -108,4 +108,18 @@ fn classify_agent_theme_no_done_zero_exit_is_theme_sync_failed() {
         classify_agent_theme(&[], 0).unwrap_err().code,
         Code::AgentThemeSyncFailed
     );
+}
+
+#[test]
+fn validate_agent_accepts_every_known_id() {
+    for agent in KNOWN_AGENTS {
+        assert!(validate_agent(agent).is_ok(), "{agent} must be accepted");
+    }
+}
+
+#[test]
+fn validate_agent_rejects_an_unknown_id() {
+    let env = validate_agent("gemini").unwrap_err();
+    assert_eq!(env.code, Code::AuthAgentNotFound);
+    assert_eq!(env.context.get("agent").map(String::as_str), Some("gemini"));
 }

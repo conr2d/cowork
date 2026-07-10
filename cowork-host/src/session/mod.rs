@@ -31,6 +31,18 @@ pub fn agent_theme_args(theme: &str) -> Vec<String> {
     ]
 }
 
+/// Canonical agent ids the guest accepts (matches its clap `ValueEnum`).
+pub const KNOWN_AGENTS: [&str; 3] = ["claude", "codex", "antigravity"];
+
+/// `auth.agent_not_found` for an id outside [`KNOWN_AGENTS`] (stale/foreign frontend value).
+pub fn validate_agent(agent: &str) -> Result<(), Envelope> {
+    if KNOWN_AGENTS.contains(&agent) {
+        Ok(())
+    } else {
+        Err(Envelope::new(Code::AuthAgentNotFound, Stage::Auth).with_context("agent", agent))
+    }
+}
+
 /// `agent.theme_sync_failed` for a theme outside {"light","dark"} (stale frontend value).
 pub fn validate_theme(theme: &str) -> Result<(), Envelope> {
     if matches!(theme, "light" | "dark") {

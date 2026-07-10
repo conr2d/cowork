@@ -51,7 +51,7 @@ pub fn classify_session_uuid(
         match event {
             HostEvent::SessionUuid { uuid, .. } => return Ok(uuid.clone()),
             HostEvent::GuestError(env) | HostEvent::ProtocolError(env) => return Err(env.clone()),
-            HostEvent::Progress { .. } | HostEvent::Done { .. } | HostEvent::AuthStatus { .. } => {}
+            HostEvent::Progress { .. } | HostEvent::Done { .. } => {}
         }
     }
     if exit_code != 0 {
@@ -70,9 +70,7 @@ pub fn classify_agent_theme(events: &[HostEvent], exit_code: i32) -> Result<(), 
         match event {
             HostEvent::Done { .. } => return Ok(()),
             HostEvent::GuestError(env) | HostEvent::ProtocolError(env) => return Err(env.clone()),
-            HostEvent::Progress { .. }
-            | HostEvent::AuthStatus { .. }
-            | HostEvent::SessionUuid { .. } => {}
+            HostEvent::Progress { .. } | HostEvent::SessionUuid { .. } => {}
         }
     }
     if exit_code != 0 {

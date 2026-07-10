@@ -20,9 +20,8 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 
 use agent::{
-    Agent, AgentConfig, AgentInstallOutcome, AgyThemeOutcome, AppTheme, AuthStatusOutcome,
-    LinuxAgentOps, SessionUuidOutcome, run_agent_install, run_agy_theme, run_auth_status,
-    run_session_uuid,
+    Agent, AgentConfig, AgentInstallOutcome, AgyThemeOutcome, AppTheme, LinuxAgentOps,
+    SessionUuidOutcome, run_agent_install, run_agy_theme, run_session_uuid,
 };
 use bootstrap::{BootstrapOutcome, Config, LinuxOps, run_bootstrap};
 use sink::StdoutSink;
@@ -53,13 +52,6 @@ enum Command {
         /// An agent to install (repeatable): claude | codex | antigravity.
         #[arg(long = "agent", required = true)]
         agents: Vec<Agent>,
-    },
-    /// Probe whether an agent's local credentials are valid (v0.2 WP4), emitting
-    /// the JSON-lines protocol on stdout.
-    AuthStatus {
-        /// The agent to probe: claude | codex | antigravity.
-        #[arg(long)]
-        agent: Agent,
     },
     /// Capture the newest agent conversation UUID for a workspace (since a spawn time).
     SessionUuid {
@@ -136,18 +128,6 @@ fn main() -> ExitCode {
                     // The structured error was already emitted on stdout; leave a
                     // human breadcrumb on stderr (the host discards stderr).
                     eprintln!("cowork: agent install failed ({:?})", env.code);
-                    ExitCode::FAILURE
-                }
-            }
-        }
-        Some(Command::AuthStatus { agent }) => {
-            let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
-            let mut ops = LinuxAgentOps;
-            let mut sink = StdoutSink;
-            match run_auth_status(&mut ops, &mut sink, agent, &home) {
-                AuthStatusOutcome::Done => ExitCode::SUCCESS,
-                AuthStatusOutcome::Failed(env) => {
-                    eprintln!("cowork: auth status failed ({:?})", env.code);
                     ExitCode::FAILURE
                 }
             }

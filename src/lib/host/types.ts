@@ -4,7 +4,7 @@
 // do not "fix" it here, it must mirror the wire).
 
 import type { Envelope, Stage } from '$lib/errors/registry';
-import type { AgentId } from '$lib/terminal/login';
+import type { AgentId } from '$lib/terminal/agent';
 
 export type { Envelope, Stage };
 
@@ -80,9 +80,6 @@ export interface WorkspacePatch {
 	preset?: string;
 	sessions?: SessionDto[];
 }
-
-/** `verify_agent_auth` result (serde external enum → bare PascalCase strings). */
-export type AgentAuthStatusDto = 'Valid' | 'Missing' | 'Unknown';
 
 /** Narrowing helper: did a `CheckStatus` fail? */
 export function isFail(status: CheckStatus): status is { Fail: Envelope } {

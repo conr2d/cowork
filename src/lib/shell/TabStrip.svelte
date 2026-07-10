@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { SessionDto, WorkspaceDto } from '$lib/host/types';
 	import * as m from '$lib/paraglide/messages';
-	import type { AgentId } from '$lib/terminal/login';
+	import type { AgentId } from '$lib/terminal/agent';
 	import AgentIcon from './AgentIcon.svelte';
 	import { brand, type SessionStatus } from './model';
 

@@ -1,5 +1,5 @@
 import type { SessionDto, WorkspaceDto } from '$lib/host/types';
-import { type AgentId, loginCommand } from '$lib/terminal/login';
+import type { AgentId } from '$lib/terminal/agent';
 
 /** Product brand shown in chrome (non-devs know these, not CLI names). */
 export function brand(agent: AgentId): string {
@@ -94,22 +94,6 @@ export function sessionLaunch(agent: AgentId, uuid: string | null, restore: bool
 		case 'antigravity':
 			return restore ? `agy --conversation ${uuid}` : agentBinary(agent);
 	}
-}
-
-/**
- * The full autorun line for a session's first spawn: when the agent's local
- * credentials are missing (lazy-auth gate), chain the agent's own login in
- * front so completing sign-in unlocks the agent in the same terminal. A
- * failed/aborted login leaves the chain unrun; the user can rerun it by hand.
- */
-export function sessionAutorun(
-	agent: AgentId,
-	uuid: string | null,
-	restore: boolean,
-	needsLogin: boolean
-): string {
-	const launch = sessionLaunch(agent, uuid, restore);
-	return needsLogin ? `${loginCommand(agent)} && ${launch}` : launch;
 }
 
 /**

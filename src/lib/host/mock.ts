@@ -2,10 +2,9 @@
 // `createMockHost` returns a happy-path client; pass overrides to inject specific
 // behaviors (e.g. a failing step, or a pending resume).
 
-import type { AgentId } from '$lib/terminal/login';
+import type { AgentId } from '$lib/terminal/agent';
 import type { HostClient } from './client';
 import type {
-	AgentAuthStatusDto,
 	PreflightReport,
 	ProgressEvent,
 	ProvisionDto,
@@ -24,8 +23,6 @@ export interface MockHostOptions {
 	resumeLaunch?: boolean;
 	resumeState?: ResumeDto | null;
 	setupComplete?: boolean;
-	/** Scripted auth-probe results; unspecified agents report 'Valid'. */
-	agentAuth?: Partial<Record<AgentId, AgentAuthStatusDto>>;
 	/** Scripted session UUID capture results; unspecified agents report null. */
 	sessionUuids?: Partial<Record<AgentId, string | null>>;
 	/** If set, the named method rejects with this value (an Envelope). */
@@ -211,8 +208,6 @@ export function createMockHost(options: MockHostOptions = {}): HostClient {
 				return Promise.reject(workspaceEnvelope('workspace.not_found', 'Internal', { slug }));
 			}
 		},
-		verifyAgentAuth: (agent: AgentId) =>
-			rejectIf('verifyAgentAuth', options.agentAuth?.[agent] ?? 'Valid'),
 		captureSessionUuid: (agent: AgentId) =>
 			rejectIf('captureSessionUuid', options.sessionUuids?.[agent] ?? null),
 		agentThemeSync: () => rejectIf('agentThemeSync', undefined)

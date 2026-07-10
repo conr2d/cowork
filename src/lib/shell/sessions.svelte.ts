@@ -3,7 +3,7 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
 import type { HostClient } from '$lib/host/client';
 import type { WorkspaceDto } from '$lib/host/types';
-import type { AgentId } from '$lib/terminal/login';
+import type { AgentId } from '$lib/terminal/agent';
 import {
 	nextSessionOrder,
 	nextSessionTitle,
@@ -28,8 +28,6 @@ export interface SessionManager {
 	activeOf(slug: string): string | null;
 	/** Restored sessions (not created this app run) spawn with the agent's resume. */
 	isRestore(sessionId: string): boolean;
-	/** Session must chain the agent's login before its spawn (lazy-auth gate). */
-	needsLogin(sessionId: string): boolean;
 	/** Workspace became active: create its first session or activate its current tab. */
 	ensureActive(workspace: WorkspaceDto): Promise<void>;
 	/** ⊕ / picker: create + persist + activate. agent=null → the workspace default. */
@@ -55,7 +53,6 @@ export function createSessionManager(
 	const activeBySlug = $state<Record<string, string>>({});
 	/** Sessions created in THIS app run (their first spawn is not a resume). */
 	const fresh = new SvelteSet<string>();
-	const loginFirst = new SvelteSet<string>();
 	const timers = new SvelteMap<string, ReturnType<typeof setTimeout>>();
 	const spawnedAt = new SvelteMap<string, number>();
 	const capturing = new SvelteSet<string>();
@@ -108,15 +105,6 @@ export function createSessionManager(
 					// Best-effort: a failed sync still mounts; the scheme may be stale.
 				}
 			}
-			if (session) {
-				try {
-					if ((await host.verifyAgentAuth(session.agent)) === 'Missing') {
-						loginFirst.add(sessionId);
-					}
-				} catch {
-					// Best-effort gate: an unreadable probe spawns without the login chain.
-				}
-			}
 			open.push({ slug: workspace.slug, sessionId });
 		}
 	}
@@ -167,9 +155,6 @@ export function createSessionManager(
 		isRestore(sessionId) {
 			return !fresh.has(sessionId);
 		},
-		needsLogin(sessionId) {
-			return loginFirst.has(sessionId);
-		},
 		async ensureActive(workspace) {
 			if (workspace.sessions.length === 0) {
 				await create(workspace, null);
@@ -186,7 +171,6 @@ export function createSessionManager(
 		async close(workspace, sessionId) {
 			open = open.filter((ref) => ref.sessionId !== sessionId);
 			fresh.delete(sessionId);
-			loginFirst.delete(sessionId);
 			spawnedAt.delete(sessionId);
 			capturing.delete(sessionId);
 			clearTimer(sessionId);

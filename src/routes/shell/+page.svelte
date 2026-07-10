@@ -11,7 +11,7 @@
 	import NewWorkspaceDialog from '$lib/shell/NewWorkspaceDialog.svelte';
 	import Sidebar from '$lib/shell/Sidebar.svelte';
 	import TabStrip from '$lib/shell/TabStrip.svelte';
-	import { sessionAutorun, sortedSessions } from '$lib/shell/model';
+	import { sessionLaunch, sortedSessions } from '$lib/shell/model';
 	import { loadCollapsed, loadTheme, saveCollapsed, saveTheme } from '$lib/shell/prefs';
 	import { createSessionManager } from '$lib/shell/sessions.svelte';
 	import { createShell } from '$lib/shell/store.svelte';
@@ -209,11 +209,11 @@
 							locale={getLocale()}
 							{theme}
 							active={isActive}
-							autorun={sessionAutorun(
+							detectLinks
+							autorun={sessionLaunch(
 								session.agent,
 								session.agentSessionUuid ?? null,
-								manager.isRestore(session.id),
-								manager.needsLogin(session.id)
+								manager.isRestore(session.id)
 							)}
 							onactivity={(event) => manager.noteActivity(session.id, event)}
 							onspawn={() => manager.noteSpawn(session.id)}

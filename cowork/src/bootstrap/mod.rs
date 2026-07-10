@@ -228,7 +228,6 @@ mod tests {
                     ("error".to_string(), format!("{:?}", envelope.code))
                 }
                 Message::Done { .. } => ("done".to_string(), String::new()),
-                Message::AuthStatus { .. } => ("auth_status".to_string(), String::new()),
                 Message::SessionUuid { .. } => ("session_uuid".to_string(), String::new()),
             };
             self.events.push(pair);

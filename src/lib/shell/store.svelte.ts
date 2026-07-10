@@ -1,7 +1,7 @@
 import type { Envelope } from '$lib/errors/registry';
 import { asEnvelope, type HostClient } from '$lib/host/client';
 import type { SessionDto, WorkspaceDto } from '$lib/host/types';
-import type { AgentId } from '$lib/terminal/login';
+import type { AgentId } from '$lib/terminal/agent';
 import { initialSlug, pinnedOf, recentOf } from './model';
 
 export interface Shell {

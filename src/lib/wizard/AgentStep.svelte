@@ -1,6 +1,6 @@
 <script lang="ts">
 	import * as m from '$lib/paraglide/messages';
-	import type { AgentId } from '$lib/terminal/login';
+	import type { AgentId } from '$lib/terminal/agent';
 	import { AGENT_CHOICES } from './agents';
 
 	let {

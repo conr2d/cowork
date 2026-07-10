@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { AgentId } from '$lib/terminal/login';
+	import type { AgentId } from '$lib/terminal/agent';
 
 	let { agent, big = false }: { agent: AgentId; big?: boolean } = $props();
 </script>

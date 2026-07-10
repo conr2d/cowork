@@ -1,10 +1,10 @@
 // The agents the wizard offers to install, and pure helpers for the selection
 // set. No runes here — this module is unit-tested directly.
 
-import type { AgentId } from '$lib/terminal/login';
+import type { AgentId } from '$lib/terminal/agent';
 
 export interface AgentChoice {
-	/** The agent's stable id (matches the guest CLI and `loginCommand`). */
+	/** The agent's stable id (matches the guest CLI). */
 	id: AgentId;
 	/** Brand name shown in the UI — a proper noun, intentionally not translated. */
 	name: string;

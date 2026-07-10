@@ -6,7 +6,7 @@
 
 import type { Envelope } from '$lib/errors/registry';
 import type { HostClient } from '$lib/host/client';
-import type { AgentId } from '$lib/terminal/login';
+import type { AgentId } from '$lib/terminal/agent';
 import { asEnvelope } from '$lib/host/client';
 import { isValidSelection, parseAgentIds, toggleAgent } from './agents';
 import { retryDelayMs, shouldAutoRetry } from './affordance';

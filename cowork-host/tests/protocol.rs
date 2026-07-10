@@ -1,4 +1,4 @@
-use cowork_errors::protocol::{AgentAuthStatus, Message, PROTOCOL_VERSION};
+use cowork_errors::protocol::{Message, PROTOCOL_VERSION};
 use cowork_errors::{Code, Envelope, Kind, Stage};
 use cowork_host::protocol::{HostEvent, StreamParser, parse_stream};
 
@@ -71,19 +71,6 @@ fn done_message_parses() {
         panic!("expected Done, got {event:?}");
     };
     assert_eq!(stage, Stage::Provision);
-}
-
-#[test]
-fn auth_status_message_parses() {
-    let mut parser = StreamParser::new(Stage::Auth);
-    let event = parser
-        .push_line(r#"{"type":"auth_status","agent":"claude","status":"Valid"}"#)
-        .expect("auth status yields an event");
-    let HostEvent::AuthStatus { agent, status } = event else {
-        panic!("expected AuthStatus, got {event:?}");
-    };
-    assert_eq!(agent, "claude");
-    assert_eq!(status, AgentAuthStatus::Valid);
 }
 
 #[test]
@@ -195,17 +182,6 @@ fn progress_serializes_with_snake_case_tag() {
     .expect("serialize progress");
     assert!(json.contains(r#""type":"progress""#), "got {json}");
     assert!(json.contains(r#""stage":"toolchain""#), "got {json}");
-}
-
-#[test]
-fn auth_status_serializes_with_snake_case_tag_and_pascal_status() {
-    let json = serde_json::to_string(&Message::AuthStatus {
-        agent: "codex".to_string(),
-        status: AgentAuthStatus::Missing,
-    })
-    .expect("serialize auth status");
-    assert!(json.contains(r#""type":"auth_status""#), "got {json}");
-    assert!(json.contains(r#""status":"Missing""#), "got {json}");
 }
 
 #[test]

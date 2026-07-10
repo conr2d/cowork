@@ -133,23 +133,6 @@ describe('createMockHost', () => {
 		await expect(host.workspaceOpenFiles('default')).rejects.toEqual(envelope);
 	});
 
-	it('reports valid auth by default', async () => {
-		const host = createMockHost();
-		await expect(host.verifyAgentAuth('claude')).resolves.toBe('Valid');
-	});
-
-	it('honors scripted auth status per agent', async () => {
-		const host = createMockHost({ agentAuth: { codex: 'Missing' } });
-		await expect(host.verifyAgentAuth('codex')).resolves.toBe('Missing');
-		await expect(host.verifyAgentAuth('claude')).resolves.toBe('Valid');
-	});
-
-	it('rejects auth status with injected failure', async () => {
-		const envelope = { code: 'auth.status_probe_failed', kind: 'Internal', stage: 'auth' };
-		const host = createMockHost({ failWith: { verifyAgentAuth: envelope } });
-		await expect(host.verifyAgentAuth('claude')).rejects.toEqual(envelope);
-	});
-
 	it('captures scripted session uuids and returns null by default', async () => {
 		const host = createMockHost({ sessionUuids: { codex: 'u1' } });
 		await expect(host.captureSessionUuid('codex', 'default', 0)).resolves.toBe('u1');

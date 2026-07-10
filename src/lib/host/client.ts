@@ -3,10 +3,9 @@
 // mock from `./mock`. Every `@tauri-apps/api` import is dynamic (inside the
 // method) so this module is safe to import from prerendered routes.
 
-import type { AgentId } from '$lib/terminal/login';
+import type { AgentId } from '$lib/terminal/agent';
 import type { Envelope } from '$lib/errors/registry';
 import type {
-	AgentAuthStatusDto,
 	PreflightReport,
 	ProgressEvent,
 	ProvisionDto,
@@ -37,7 +36,6 @@ export interface HostClient {
 	workspaceDelete(slug: string): Promise<void>;
 	workspaceSlugPreview(name: string): Promise<string>;
 	workspaceOpenFiles(slug: string): Promise<void>;
-	verifyAgentAuth(agent: AgentId): Promise<AgentAuthStatusDto>;
 	captureSessionUuid(agent: AgentId, slug: string, sinceMs: number): Promise<string | null>;
 	agentThemeSync(theme: 'light' | 'dark'): Promise<void>;
 }
@@ -124,10 +122,6 @@ export const tauriHost: HostClient = {
 	async workspaceOpenFiles(slug) {
 		const { invoke } = await import('@tauri-apps/api/core');
 		await invoke('workspace_open_files', { slug });
-	},
-	async verifyAgentAuth(agent) {
-		const { invoke } = await import('@tauri-apps/api/core');
-		return invoke<AgentAuthStatusDto>('verify_agent_auth', { agent });
 	},
 	async captureSessionUuid(agent, slug, sinceMs) {
 		const { invoke } = await import('@tauri-apps/api/core');

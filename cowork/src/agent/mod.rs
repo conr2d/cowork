@@ -7,7 +7,6 @@
 //! unit-tested against a mock [`AgentOps`]; the real process/filesystem glue is
 //! [`LinuxAgentOps`].
 
-mod auth;
 mod command;
 mod ops;
 mod session;
@@ -19,7 +18,6 @@ use cowork_errors::Envelope;
 use cowork_errors::Stage;
 use cowork_errors::protocol::{Message, PROTOCOL_VERSION};
 
-pub use auth::{AuthStatusOutcome, run_auth_status};
 pub use command::Agent;
 pub use ops::{AgentOps, InstallOutcome, LinuxAgentOps};
 pub use session::{SessionUuidOutcome, run_session_uuid};
@@ -201,7 +199,6 @@ mod tests {
                     ("error".to_string(), format!("{:?}", envelope.code))
                 }
                 Message::Done { .. } => ("done".to_string(), String::new()),
-                Message::AuthStatus { .. } => ("auth_status".to_string(), String::new()),
                 Message::SessionUuid { .. } => ("session_uuid".to_string(), String::new()),
             };
             self.events.push(pair);

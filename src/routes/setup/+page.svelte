@@ -19,4 +19,4 @@
 	}
 </script>
 
-<WizardShell {wizard} host={tauriHost} onFinish={finish} />
+<WizardShell {wizard} onFinish={finish} />

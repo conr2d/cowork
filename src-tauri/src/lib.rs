@@ -11,7 +11,6 @@
 //! stays host-agnostic (enforced by the host/guest-separation conformance gate)
 //! so a future Mac/Linux host is "write a new host driver", not a rewrite.
 
-mod auth;
 mod pty;
 mod session;
 mod setup;
@@ -55,7 +54,6 @@ pub fn run() {
             workspace::workspace_delete,
             workspace::workspace_slug_preview,
             workspace::workspace_open_files,
-            auth::verify_agent_auth,
             session::capture_session_uuid,
             session::agent_theme_sync,
         ])

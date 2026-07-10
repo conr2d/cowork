@@ -53,7 +53,6 @@
 		"auth.browser_launch_failed": { "kind": "NeedsUserAction", "contextKeys": ["agent"] },
 		"auth.oauth_callback_failed": { "kind": "NeedsUserAction", "contextKeys": ["agent"] },
 		"auth.agent_not_found": { "kind": "Internal", "contextKeys": ["agent"] },
-		"auth.status_probe_failed": { "kind": "Internal", "contextKeys": ["agent"] },
 		"session.uuid_capture_failed": { "kind": "Internal", "contextKeys": ["agent"] },
 		"agent.theme_sync_failed": { "kind": "Internal", "contextKeys": ["agent"] },
 

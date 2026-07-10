@@ -32,7 +32,6 @@
 		workspace = '~',
 		locale = 'en',
 		detectLinks = false,
-		loginAttempts = 0,
 		theme = undefined,
 		autorun = undefined,
 		onspawn = undefined,
@@ -43,7 +42,6 @@
 		workspace?: string;
 		locale?: string;
 		detectLinks?: boolean;
-		loginAttempts?: number;
 		theme?: 'light' | 'dark';
 		autorun?: string;
 		onspawn?: (id: number) => void;
@@ -136,10 +134,10 @@
 				const bytes = base64ToBytes(chunk);
 				term.write(bytes);
 				onactivity?.('output');
-				// Only scan once a login has been triggered — otherwise the shell's
-				// startup banner (e.g. the Ubuntu MOTD URL) would surface the button
-				// before the user has started signing in.
-				if (detectLinks && loginAttempts > 0) {
+				// createUrlScanner only reports OAuth/device sign-in URLs (isLoginUrl),
+				// so an agent's own login prompt surfaces the button while the shell's
+				// MOTD and docs links never do.
+				if (detectLinks) {
 					const url = scanner.push(decoder.decode(bytes, { stream: true }));
 					if (url) detectedUrl = url;
 				}
@@ -177,12 +175,6 @@
 				term.dispose();
 			};
 		})();
-	});
-
-	// Focus the terminal each time a login is triggered, so the user can type /
-	// paste (e.g. an auth code) without having to click into the terminal first.
-	$effect(() => {
-		if (loginAttempts > 0) termRef?.focus();
 	});
 
 	// Focus when this terminal's tab becomes the active one.

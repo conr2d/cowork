@@ -8,6 +8,7 @@ export const WIZARD_STEPS = [
 	'language',
 	'agents',
 	'preflight',
+	'permission',
 	'wsl',
 	'provision',
 	'toolchain',
@@ -19,9 +20,14 @@ export type WizardStep = (typeof WIZARD_STEPS)[number];
 
 /** The steps shown before any host work runs. */
 export const ONBOARDING_STEPS = ['language', 'agents'] as const;
+export const INTERSTITIAL_STEPS = ['permission'] as const;
 
 export function isOnboardingStep(step: WizardStep): boolean {
 	return (ONBOARDING_STEPS as readonly WizardStep[]).includes(step);
+}
+
+export function isInterstitialStep(step: WizardStep): boolean {
+	return (INTERSTITIAL_STEPS as readonly WizardStep[]).includes(step);
 }
 
 /**

@@ -12,7 +12,7 @@ import { isValidSelection, toggleAgent } from './agents';
 import { retryDelayMs, shouldAutoRetry } from './affordance';
 import { loadBootstrapState } from './bootstrap';
 import { firstPreflightFailure, RUNNER_STEPS, type RunnerStep } from './runner';
-import { isOnboardingStep, nextStep, prevStep, type WizardStep } from './steps';
+import { isInterstitialStep, isOnboardingStep, nextStep, prevStep, type WizardStep } from './steps';
 
 export interface Wizard {
 	readonly step: WizardStep;
@@ -80,6 +80,8 @@ export function createWizard(host: HostClient): Wizard {
 		step = nextStep(step);
 		if (RUNNER_STEPS.some((s) => s.id === step)) {
 			void runActive();
+		} else if (isInterstitialStep(step)) {
+			return;
 		} else {
 			done = true;
 			void host.clearResume();

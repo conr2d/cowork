@@ -36,6 +36,7 @@ export interface HostClient {
 	workspaceSlugPreview(name: string): Promise<string>;
 	workspaceOpenFiles(slug: string): Promise<void>;
 	captureSessionUuid(agent: AgentId, slug: string, sinceMs: number): Promise<string | null>;
+	sessionCheck(agent: AgentId, uuid: string): Promise<boolean>;
 	agentThemeSync(theme: 'light' | 'dark'): Promise<void>;
 }
 
@@ -121,6 +122,10 @@ export const tauriHost: HostClient = {
 	async captureSessionUuid(agent, slug, sinceMs) {
 		const { invoke } = await import('@tauri-apps/api/core');
 		return invoke<string | null>('capture_session_uuid', { agent, slug, sinceMs });
+	},
+	async sessionCheck(agent, uuid) {
+		const { invoke } = await import('@tauri-apps/api/core');
+		return invoke<boolean>('session_check', { agent, uuid });
 	},
 	async agentThemeSync(theme) {
 		const { invoke } = await import('@tauri-apps/api/core');

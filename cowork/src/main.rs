@@ -21,7 +21,7 @@ use clap::{Parser, Subcommand};
 
 use agent::{
     Agent, AgentConfig, AgentInstallOutcome, AgyThemeOutcome, AppTheme, LinuxAgentOps,
-    SessionUuidOutcome, run_agent_install, run_agy_theme, run_session_uuid,
+    SessionUuidOutcome, run_agent_install, run_agy_theme, run_session_check, run_session_uuid,
 };
 use bootstrap::{BootstrapOutcome, Config, LinuxOps, run_bootstrap};
 use sink::StdoutSink;
@@ -61,6 +61,13 @@ enum Command {
         slug: String,
         #[arg(long)]
         since_ms: u64,
+    },
+    /// Check whether an agent conversation UUID already exists.
+    SessionCheck {
+        #[arg(long)]
+        agent: Agent,
+        #[arg(long)]
+        uuid: String,
     },
     /// Write antigravity's colorScheme to match the app theme (before an agy spawn).
     AgentTheme {
@@ -143,6 +150,17 @@ fn main() -> ExitCode {
                 SessionUuidOutcome::Done => ExitCode::SUCCESS,
                 SessionUuidOutcome::Failed(env) => {
                     eprintln!("cowork: session uuid failed ({:?})", env.code);
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some(Command::SessionCheck { agent, uuid }) => {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+            let mut sink = StdoutSink;
+            match run_session_check(&mut sink, agent, &home, &uuid) {
+                SessionUuidOutcome::Done => ExitCode::SUCCESS,
+                SessionUuidOutcome::Failed(env) => {
+                    eprintln!("cowork: session check failed ({:?})", env.code);
                     ExitCode::FAILURE
                 }
             }

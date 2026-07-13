@@ -8,6 +8,7 @@ import {
 	nextSessionOrder,
 	nextSessionTitle,
 	pruneOpen,
+	resolveRestoreUuid,
 	type SessionRef,
 	type SessionStatus,
 	sortedSessions
@@ -28,6 +29,7 @@ export interface SessionManager {
 	activeOf(slug: string): string | null;
 	/** Restored sessions (not created this app run) spawn with the agent's resume. */
 	isRestore(sessionId: string): boolean;
+	launchUuid(sessionId: string, fallback: string | null): string | null;
 	/** Workspace became active: create its first session or activate its current tab. */
 	ensureActive(workspace: WorkspaceDto): Promise<void>;
 	/** ⊕ / picker: create + persist + activate. agent=null → the workspace default. */
@@ -56,11 +58,18 @@ export function createSessionManager(
 	const timers = new SvelteMap<string, ReturnType<typeof setTimeout>>();
 	const spawnedAt = new SvelteMap<string, number>();
 	const capturing = new SvelteSet<string>();
+	const launchUuids = new SvelteMap<string, string | null>();
 
 	function clearTimer(sessionId: string): void {
 		const timer = timers.get(sessionId);
 		if (timer !== undefined) clearTimeout(timer);
 		timers.delete(sessionId);
+	}
+
+	function resolveSession(slug: string, sessionId: string) {
+		const workspace = shell.workspaces.find((item) => item.slug === slug);
+		const session = workspace?.sessions.find((item) => item.id === sessionId);
+		return { workspace, session };
 	}
 
 	async function maybeCapture(sessionId: string): Promise<void> {
@@ -97,7 +106,21 @@ export function createSessionManager(
 		activeBySlug[workspace.slug] = sessionId;
 		statuses[sessionId] ??= 'cold';
 		if (!open.some((ref) => ref.sessionId === sessionId)) {
-			const session = workspace.sessions.find((item) => item.id === sessionId);
+			let session = workspace.sessions.find((item) => item.id === sessionId);
+			const launchUuid = session
+				? await resolveRestoreUuid(host, session, !fresh.has(sessionId), async () => {
+						const current = resolveSession(workspace.slug, sessionId);
+						if (!current.workspace || !current.session) return;
+						await shell.updateSessions(
+							current.workspace.slug,
+							current.workspace.sessions.map((item) =>
+								item.id === sessionId ? { ...item, agentSessionUuid: null } : item
+							)
+						);
+						session = resolveSession(workspace.slug, sessionId).session ?? session;
+					})
+				: null;
+			launchUuids.set(sessionId, launchUuid);
 			if (session?.agent === 'antigravity') {
 				try {
 					await host.agentThemeSync(theme());
@@ -155,6 +178,9 @@ export function createSessionManager(
 		isRestore(sessionId) {
 			return !fresh.has(sessionId);
 		},
+		launchUuid(sessionId, fallback) {
+			return launchUuids.has(sessionId) ? launchUuids.get(sessionId)! : fallback;
+		},
 		async ensureActive(workspace) {
 			if (workspace.sessions.length === 0) {
 				await create(workspace, null);
@@ -173,6 +199,7 @@ export function createSessionManager(
 			fresh.delete(sessionId);
 			spawnedAt.delete(sessionId);
 			capturing.delete(sessionId);
+			launchUuids.delete(sessionId);
 			clearTimer(sessionId);
 			delete statuses[sessionId];
 			await shell.updateSessions(
@@ -197,6 +224,9 @@ export function createSessionManager(
 				untrack(() => open),
 				workspaces
 			);
+			for (const sessionId of launchUuids.keys()) {
+				if (!open.some((ref) => ref.sessionId === sessionId)) launchUuids.delete(sessionId);
+			}
 		},
 		noteSpawn(sessionId) {
 			spawnedAt.set(sessionId, Date.now());

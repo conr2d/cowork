@@ -21,7 +21,7 @@ use cowork_errors::protocol::{Message, PROTOCOL_VERSION};
 
 pub use command::Agent;
 pub use ops::{AgentOps, InstallOutcome, LinuxAgentOps};
-pub use session::{SessionUuidOutcome, run_session_uuid};
+pub use session::{SessionUuidOutcome, run_session_check, run_session_uuid};
 pub use theme::{AgyThemeOutcome, AppTheme, run_agy_theme};
 
 use crate::sink::ProgressSink;

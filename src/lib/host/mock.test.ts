@@ -137,6 +137,12 @@ describe('createMockHost', () => {
 		await expect(host.captureSessionUuid('antigravity', 'default', 0)).resolves.toBeNull();
 	});
 
+	it('probes scripted session existence and defaults to exists', async () => {
+		const host = createMockHost({ sessionChecks: { claude: false } });
+		await expect(host.sessionCheck('claude', 'u1')).resolves.toBe(false);
+		await expect(host.sessionCheck('codex', 'u2')).resolves.toBe(true);
+	});
+
 	it('syncs agent theme and rejects scripted failures', async () => {
 		const envelope = { code: 'agent.theme_sync_failed', kind: 'Internal', stage: 'workspace' };
 		await expect(createMockHost().agentThemeSync('dark')).resolves.toBeUndefined();

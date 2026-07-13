@@ -212,7 +212,7 @@
 							detectLinks
 							autorun={sessionLaunch(
 								session.agent,
-								session.agentSessionUuid ?? null,
+								manager.launchUuid(session.id, session.agentSessionUuid ?? null),
 								manager.isRestore(session.id)
 							)}
 							onactivity={(event) => manager.noteActivity(session.id, event)}

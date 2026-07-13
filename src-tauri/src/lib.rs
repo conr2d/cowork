@@ -60,6 +60,7 @@ pub fn run() {
             workspace::workspace_slug_preview,
             workspace::workspace_open_files,
             session::capture_session_uuid,
+            session::session_check,
             session::agent_theme_sync,
         ])
         .run(tauri::generate_context!())

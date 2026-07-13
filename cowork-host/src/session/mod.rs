@@ -4,7 +4,7 @@
 #[cfg(windows)]
 mod windows_session;
 #[cfg(windows)]
-pub use windows_session::{capture_session_uuid, sync_agent_theme};
+pub use windows_session::{capture_session_uuid, session_check, sync_agent_theme};
 
 use cowork_errors::{Code, Envelope, Stage};
 
@@ -20,6 +20,16 @@ pub fn session_uuid_args(agent: &str, slug: &str, since_ms: u64) -> Vec<String> 
         slug.to_string(),
         "--since-ms".to_string(),
         since_ms.to_string(),
+    ]
+}
+
+pub fn session_check_args(agent: &str, uuid: &str) -> Vec<String> {
+    vec![
+        "session-check".to_string(),
+        "--agent".to_string(),
+        agent.to_string(),
+        "--uuid".to_string(),
+        uuid.to_string(),
     ]
 }
 
@@ -72,6 +82,24 @@ pub fn classify_session_uuid(
         Err(
             Envelope::new(Code::SessionUuidCaptureFailed, Stage::Workspace)
                 .with_context("agent", agent)
+                .with_cause("guest emitted no session uuid"),
+        )
+    }
+}
+
+pub fn classify_session_check(events: &[HostEvent], exit_code: i32) -> Result<bool, Envelope> {
+    for event in events {
+        match event {
+            HostEvent::SessionUuid { uuid, .. } => return Ok(uuid.is_some()),
+            HostEvent::GuestError(env) | HostEvent::ProtocolError(env) => return Err(env.clone()),
+            HostEvent::Progress { .. } | HostEvent::Done { .. } => {}
+        }
+    }
+    if exit_code != 0 {
+        Err(cli_crashed_envelope(exit_code, Stage::Workspace))
+    } else {
+        Err(
+            Envelope::new(Code::SessionUuidCaptureFailed, Stage::Workspace)
                 .with_cause("guest emitted no session uuid"),
         )
     }

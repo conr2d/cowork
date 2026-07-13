@@ -18,6 +18,13 @@ pub async fn capture_session_uuid(
 }
 
 #[tauri::command]
+pub async fn session_check(agent: String, uuid: String) -> Result<bool, Envelope> {
+    tauri::async_runtime::spawn_blocking(move || cowork_host::session::session_check(&agent, &uuid))
+        .await
+        .map_err(join_envelope(Stage::Workspace))?
+}
+
+#[tauri::command]
 pub async fn agent_theme_sync(theme: String) -> Result<(), Envelope> {
     tauri::async_runtime::spawn_blocking(move || cowork_host::session::sync_agent_theme(&theme))
         .await

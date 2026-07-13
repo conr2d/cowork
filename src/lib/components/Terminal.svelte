@@ -70,7 +70,6 @@
 
 	function openDetectedUrl() {
 		if (detectedUrl && openUrl) void openUrl(detectedUrl);
-		clearDetectedUrl();
 		refocusTerminal();
 	}
 

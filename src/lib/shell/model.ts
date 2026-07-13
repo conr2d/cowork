@@ -1,3 +1,4 @@
+import type { HostClient } from '$lib/host/client';
 import type { SessionDto, WorkspaceDto } from '$lib/host/types';
 import type { AgentId } from '$lib/terminal/agent';
 
@@ -76,13 +77,36 @@ export function nextSessionTitle(sessions: readonly SessionDto[], agent: AgentId
 	return `${brand(agent)} ${count + 1}`;
 }
 
+export async function resolveRestoreUuid(
+	host: HostClient,
+	session: SessionDto,
+	restore: boolean,
+	persistClearedUuid: () => Promise<void>
+): Promise<string | null> {
+	const launchUuid = session.agentSessionUuid ?? null;
+	if (!restore || session.agent !== 'claude' || launchUuid === null) return launchUuid;
+	try {
+		const exists = await host.sessionCheck(session.agent, launchUuid);
+		if (!exists) {
+			try {
+				await persistClearedUuid();
+			} catch {
+				// Best-effort: a failed clear must not block the current bare launch.
+			}
+			return null;
+		}
+	} catch {
+		// Best-effort: a failed probe must not block a working resume.
+	}
+	return launchUuid;
+}
+
 /**
  * The command autorun at PTY spawn for a session. Fresh claude sessions pin a
  * host-generated UUID (--session-id) so a later restore can resume; codex and
  * antigravity UUIDs are captured lazily after first activity, so a fresh spawn
- * is bare and only a restore resumes. A restored session whose conversation
- * never materialized surfaces the agent's own error — accepted; the user opens
- * a new tab.
+ * is bare and only a restore resumes. Claude restores may clear a stale stored
+ * UUID before spawn when the conversation file never materialized.
  */
 export function sessionLaunch(agent: AgentId, uuid: string | null, restore: boolean): string {
 	if (uuid === null) return agentBinary(agent);

@@ -24,6 +24,8 @@ export interface MockHostOptions {
 	setupComplete?: boolean;
 	/** Scripted session UUID capture results; unspecified agents report null. */
 	sessionUuids?: Partial<Record<AgentId, string | null>>;
+	/** Scripted session existence probe results; unspecified agents report true. */
+	sessionChecks?: Partial<Record<AgentId, boolean>>;
 	/** If set, the named method rejects with this value (an Envelope). */
 	failWith?: Partial<Record<keyof HostClient, unknown>>;
 }
@@ -208,6 +210,8 @@ export function createMockHost(options: MockHostOptions = {}): HostClient {
 		},
 		captureSessionUuid: (agent: AgentId) =>
 			rejectIf('captureSessionUuid', options.sessionUuids?.[agent] ?? null),
+		sessionCheck: (agent: AgentId) =>
+			rejectIf('sessionCheck', options.sessionChecks?.[agent] ?? true),
 		agentThemeSync: () => rejectIf('agentThemeSync', undefined)
 	};
 }

@@ -645,6 +645,7 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]

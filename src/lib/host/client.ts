@@ -25,7 +25,6 @@ export interface HostClient {
 	guestBootstrap(onProgress: (event: ProgressEvent) => void): Promise<void>;
 	guestAgentInstall(agents: AgentId[], onProgress: (event: ProgressEvent) => void): Promise<void>;
 	removeCoworkDistro(): Promise<void>;
-	isResumeLaunch(): Promise<boolean>;
 	getResumeState(): Promise<ResumeDto | null>;
 	clearResume(): Promise<void>;
 	setupIsComplete(): Promise<boolean>;
@@ -78,10 +77,6 @@ export const tauriHost: HostClient = {
 	async removeCoworkDistro() {
 		const { invoke } = await import('@tauri-apps/api/core');
 		await invoke('remove_cowork_distro');
-	},
-	async isResumeLaunch() {
-		const { invoke } = await import('@tauri-apps/api/core');
-		return invoke<boolean>('is_resume_launch');
 	},
 	async getResumeState() {
 		const { invoke } = await import('@tauri-apps/api/core');

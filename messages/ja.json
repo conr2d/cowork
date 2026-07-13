@@ -15,7 +15,7 @@
 	"agent_codex_desc": "OpenAI の Codex CLI。",
 	"agent_antigravity_desc": "Google の Antigravity CLI。",
 	"runner_title": "Coworkをセットアップ中",
-	"runner_reboot_body": "続行するにはPCの再起動が必要です。再起動後、Coworkが自動的に再開します。",
+	"runner_reboot_body": "続行するにはPCの再起動が必要です。再サインイン後、Cowork は自動的に再び開きますが、最大で1分ほどかかることがあります。待ちたくない場合は、ご自身で Cowork を開いても問題なく、途中の続きから再開されます。",
 	"runner_active_hint": "数分かかることがあります。このウィンドウは閉じないでください。",
 	"error_auto_retrying": "自動的に再試行しています…（{attempt}/{max}）",
 	"step_preflight": "PCを確認しています",

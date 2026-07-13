@@ -21,6 +21,12 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .manage(pty::PtyState::default())
@@ -43,7 +49,6 @@ pub fn run() {
             setup::guest_bootstrap,
             setup::guest_agent_install,
             setup::remove_cowork_distro,
-            setup::is_resume_launch,
             setup::get_resume_state,
             setup::clear_resume,
             setup::setup_is_complete,

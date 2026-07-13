@@ -40,10 +40,8 @@ describe('createMockHost', () => {
 
 	it('honors a pending resume state', async () => {
 		const host = createMockHost({
-			resumeLaunch: true,
 			resumeState: { stage: 'WslReady', selectedAgents: ['codex'] }
 		});
-		expect(await host.isResumeLaunch()).toBe(true);
 		expect(await host.getResumeState()).toEqual({ stage: 'WslReady', selectedAgents: ['codex'] });
 	});
 

@@ -20,7 +20,6 @@ export interface MockHostOptions {
 	provision?: ProvisionDto;
 	bootstrapSteps?: ProgressEvent[];
 	agentInstallSteps?: ProgressEvent[];
-	resumeLaunch?: boolean;
 	resumeState?: ResumeDto | null;
 	setupComplete?: boolean;
 	/** Scripted session UUID capture results; unspecified agents report null. */
@@ -133,7 +132,6 @@ export function createMockHost(options: MockHostOptions = {}): HostClient {
 				onProgress
 			),
 		removeCoworkDistro: () => rejectIf('removeCoworkDistro', undefined),
-		isResumeLaunch: () => rejectIf('isResumeLaunch', options.resumeLaunch ?? false),
 		getResumeState: () => rejectIf('getResumeState', options.resumeState ?? null),
 		clearResume: () => rejectIf('clearResume', undefined),
 		setupIsComplete: () => rejectIf('setupIsComplete', setupComplete),

@@ -15,7 +15,7 @@
 	"agent_codex_desc": "OpenAI의 Codex CLI.",
 	"agent_antigravity_desc": "Google의 Antigravity CLI.",
 	"runner_title": "Cowork 설치 중",
-	"runner_reboot_body": "계속하려면 PC를 다시 시작해야 합니다. 다시 시작하면 Cowork가 자동으로 이어집니다.",
+	"runner_reboot_body": "계속하려면 PC를 다시 시작해야 합니다. 다시 로그인한 뒤 Cowork가 자동으로 다시 열리지만, 최대 1분 정도 걸릴 수 있습니다. 기다리지 않으려면 직접 Cowork를 열어도 되며, 중단한 지점부터 이어집니다.",
 	"runner_active_hint": "몇 분 정도 걸릴 수 있습니다. 이 창을 닫지 마세요.",
 	"error_auto_retrying": "자동으로 다시 시도하는 중…（{attempt}/{max}）",
 	"step_preflight": "PC 확인 중",

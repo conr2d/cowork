@@ -42,7 +42,8 @@ pub enum ProvisionDto {
     AlreadyExists,
 }
 
-/// Persisted wizard resume state, exposed to the frontend on a `--resume` launch.
+/// Persisted wizard resume state, exposed to the frontend when a pending resume
+/// file exists.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResumeDto {
@@ -298,12 +299,6 @@ pub fn setup_is_complete() -> bool {
 #[tauri::command]
 pub fn setup_mark_complete() -> Result<(), Envelope> {
     mark_setup_complete(&setup_marker_path()?)
-}
-
-/// True if the process was relaunched by RunOnce after a reboot (`--resume`).
-#[tauri::command]
-pub fn is_resume_launch() -> bool {
-    std::env::args().any(|a| a == "--resume")
 }
 
 /// Read persisted resume state, if any. `Ok(None)` when there is no pending

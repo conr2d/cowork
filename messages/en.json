@@ -16,7 +16,7 @@
 	"agent_codex_desc": "Codex CLI by OpenAI.",
 	"agent_antigravity_desc": "Antigravity CLI by Google.",
 	"runner_title": "Setting up Cowork",
-	"runner_reboot_body": "Your PC needs to restart to continue. Cowork will resume automatically after it restarts.",
+	"runner_reboot_body": "Your PC needs to restart to continue. After you sign back in, Cowork reopens by itself, which can take up to a minute. If you would rather not wait, opening Cowork yourself is fine and it will pick up where it left off.",
 	"runner_active_hint": "This can take a few minutes. Please keep this window open.",
 	"error_auto_retrying": "Retrying automatically… ({attempt} of {max})",
 	"step_preflight": "Checking your PC",

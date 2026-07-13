@@ -218,14 +218,18 @@ export function createSessionManager(
 			}
 		},
 		prune(workspaces) {
-			// untrack: prune is called from an effect tracking `workspaces`; reading
-			// `open` tracked would re-trigger on our own write and loop.
-			open = pruneOpen(
+			// prune runs inside an effect that tracks `workspaces`. Every read of
+			// `open` here must be untracked, including the one below: pruneOpen
+			// returns a NEW array each call, so a tracked read of what we just wrote
+			// would re-trigger this effect forever (effect_update_depth_exceeded).
+			// Hence `next`, the plain array — reading it is not reading the signal.
+			const next = pruneOpen(
 				untrack(() => open),
 				workspaces
 			);
+			open = next;
 			for (const sessionId of launchUuids.keys()) {
-				if (!open.some((ref) => ref.sessionId === sessionId)) launchUuids.delete(sessionId);
+				if (!next.some((ref) => ref.sessionId === sessionId)) launchUuids.delete(sessionId);
 			}
 		},
 		noteSpawn(sessionId) {

@@ -188,7 +188,17 @@
 					fontSize: 14,
 					allowProposedApi: true,
 					windowsPty: { backend: 'conpty' },
-					theme: theme ? palette(theme) : undefined
+					theme: theme ? palette(theme) : undefined,
+					// OSC 8 hyperlinks (claude prints its sign-in link as one) never reach
+					// WebLinksAddon — that addon only scans plain text. They go through this
+					// option instead, and xterm's default for it is window.open, which the
+					// webview blocks ("Opening link blocked as opener could not be cleared").
+					// Route them to the host opener, like the plain-text links.
+					linkHandler: {
+						activate: (_event, uri) => {
+							void openUrl?.(uri);
+						}
+					}
 				});
 				termRef = term;
 

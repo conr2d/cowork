@@ -120,70 +120,72 @@
 	/>
 
 	<main class="main">
-		<div class="ctxbar">
+		<div class="chrome">
+			<div class="ctxbar">
+				{#if shell.active}
+					<span class="ctx-name">{shell.active.name}</span>
+					<span class="ctx-path">~/workspaces/{shell.active.slug}</span>
+				{/if}
+				<span class="ctx-spacer"></span>
+				<button
+					type="button"
+					class="btn"
+					disabled={!shell.active}
+					title={m.shell_files()}
+					onclick={() => {
+						if (shell.active) void shell.openFiles(shell.active.slug);
+					}}
+				>
+					<svg viewBox="0 0 24 24" width="15" height="15">
+						<path
+							d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"
+						/>
+					</svg>
+					{m.shell_files()}
+				</button>
+			</div>
+
 			{#if shell.active}
-				<span class="ctx-name">{shell.active.name}</span>
-				<span class="ctx-path">~/workspaces/{shell.active.slug}</span>
+				<TabStrip
+					workspace={shell.active}
+					tabs={sortedSessions(shell.active.sessions)}
+					activeId={manager.activeOf(shell.active.slug)}
+					statuses={manager.statuses}
+					oncreate={(agent) => {
+						if (shell.active) void manager.create(shell.active, agent);
+					}}
+					onactivate={(id) => {
+						if (shell.active) void manager.activate(shell.active, id);
+					}}
+					onclose={(id) => {
+						if (shell.active) void manager.close(shell.active, id);
+					}}
+				/>
 			{/if}
-			<span class="ctx-spacer"></span>
-			<button
-				type="button"
-				class="btn"
-				disabled={!shell.active}
-				title={m.shell_files()}
-				onclick={() => {
-					if (shell.active) void shell.openFiles(shell.active.slug);
-				}}
-			>
-				<svg viewBox="0 0 24 24" width="15" height="15">
-					<path
-						d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"
-					/>
-				</svg>
-				{m.shell_files()}
-			</button>
+
+			{#if manager.advisorySlug !== null}
+				<div class="advisorybar">
+					<span>{m.session_advisory()}</span>
+					<button
+						type="button"
+						aria-label={m.action_cancel()}
+						onclick={() => manager.dismissAdvisory()}>×</button
+					>
+				</div>
+			{/if}
+
+			{#if visibleError}
+				<div class="errorbar">
+					<span>{m.error_title()}</span>
+					<code>{visibleError.code}</code>
+					<button
+						type="button"
+						aria-label={m.action_cancel()}
+						onclick={() => (dismissedError = visibleError)}>×</button
+					>
+				</div>
+			{/if}
 		</div>
-
-		{#if shell.active}
-			<TabStrip
-				workspace={shell.active}
-				tabs={sortedSessions(shell.active.sessions)}
-				activeId={manager.activeOf(shell.active.slug)}
-				statuses={manager.statuses}
-				oncreate={(agent) => {
-					if (shell.active) void manager.create(shell.active, agent);
-				}}
-				onactivate={(id) => {
-					if (shell.active) void manager.activate(shell.active, id);
-				}}
-				onclose={(id) => {
-					if (shell.active) void manager.close(shell.active, id);
-				}}
-			/>
-		{/if}
-
-		{#if manager.advisorySlug !== null}
-			<div class="advisorybar">
-				<span>{m.session_advisory()}</span>
-				<button
-					type="button"
-					aria-label={m.action_cancel()}
-					onclick={() => manager.dismissAdvisory()}>×</button
-				>
-			</div>
-		{/if}
-
-		{#if visibleError}
-			<div class="errorbar">
-				<span>{m.error_title()}</span>
-				<code>{visibleError.code}</code>
-				<button
-					type="button"
-					aria-label={m.action_cancel()}
-					onclick={() => (dismissedError = visibleError)}>×</button
-				>
-			</div>
-		{/if}
 
 		<section class="term">
 			{#if shell.loading}
@@ -311,11 +313,16 @@
 			opacity 0.16s ease;
 	}
 	.main {
+		position: relative;
 		flex: 1 1 auto;
 		display: flex;
 		flex-direction: column;
 		min-width: 0;
 		background: var(--term-bg);
+	}
+	.chrome {
+		position: relative;
+		z-index: 1;
 	}
 	.ctxbar {
 		display: flex;
@@ -407,6 +414,7 @@
 	}
 	.term {
 		position: relative;
+		z-index: 0;
 		flex: 1 1 auto;
 		min-height: 0;
 		background: var(--term-bg);

@@ -100,7 +100,8 @@
 			// so the host opens the browser, not the guest.
 			term.loadAddon(
 				new WebLinksAddon((_event, uri) => {
-					void openUrl!(uri);
+					const target = detectedUrl && detectedUrl.startsWith(uri) ? detectedUrl : uri;
+					void openUrl!(target);
 				})
 			);
 

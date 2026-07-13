@@ -37,6 +37,7 @@
 	"done_body": "各アシスタントは初回起動時にサインインを求めます。",
 	"done_open": "Cowork を開く",
 	"auth_open_login": "サインインページを開く",
+	"auth_dismiss": "閉じる",
 	"shell_new_workspace": "新しいワークスペース",
 	"shell_pinned": "ピン留め",
 	"shell_recent": "最近",

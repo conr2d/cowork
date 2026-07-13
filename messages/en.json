@@ -38,6 +38,7 @@
 	"done_body": "Each assistant asks you to sign in the first time you open it.",
 	"done_open": "Open Cowork",
 	"auth_open_login": "Open sign-in page",
+	"auth_dismiss": "Dismiss",
 	"shell_new_workspace": "New workspace",
 	"shell_pinned": "Pinned",
 	"shell_recent": "Recent",

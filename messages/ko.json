@@ -37,6 +37,7 @@
 	"done_body": "각 어시스턴트는 처음 열 때 로그인을 요청합니다.",
 	"done_open": "Cowork 열기",
 	"auth_open_login": "로그인 페이지 열기",
+	"auth_dismiss": "닫기",
 	"shell_new_workspace": "새 워크스페이스",
 	"shell_pinned": "고정됨",
 	"shell_recent": "최근",

@@ -8,8 +8,6 @@ use cowork_errors::{Code, Envelope, Stage};
 
 use crate::cmd::Cmd;
 
-/// Homebrew's official default install prefix on Linux.
-pub const BREW_PREFIX: &str = "/home/linuxbrew/.linuxbrew";
 /// Absolute path of the `brew` binary once installed; used as an idempotency probe.
 pub const BREW_BIN: &str = "/home/linuxbrew/.linuxbrew/bin/brew";
 /// Homebrew's official unattended installer URL.
@@ -108,7 +106,7 @@ pub fn profile_path(home: &str) -> String {
 /// The default workspace directory created during bootstrap: `<home>/workspaces/default`.
 /// Workspaces live under a `workspaces/` container (one per agent session, created
 /// repeatedly); `default` is the single workspace seeded in v0.1. The container shape
-/// is the seed for v0.2 per-workspace isolation — siblings are added with no migration.
+/// is the seed for v0.2 per-workspace isolation.
 pub fn workspace_path(home: &str) -> String {
     format!("{home}/workspaces/default")
 }
@@ -139,20 +137,6 @@ pub fn profile_lines() -> Vec<String> {
         r#"[ -d "$HOME/.local/share/mise/shims" ] && PATH="$HOME/.local/share/mise/shims:$PATH""#
             .to_string(),
     ]
-}
-
-/// The exact activation lines previous versions appended to `~/.bashrc`. Removed by
-/// the bootstrap so an upgraded distro does not carry a duplicate, dead activation.
-pub fn legacy_bashrc_lines(home: &str) -> Vec<String> {
-    vec![
-        format!(r#"eval "$({BREW_PREFIX}/bin/brew shellenv)""#),
-        format!(r#"eval "$({home}/.local/bin/mise activate bash)""#),
-    ]
-}
-
-/// `~/.bashrc` — only used now to strip [`legacy_bashrc_lines`].
-pub fn bashrc_path(home: &str) -> String {
-    format!("{home}/.bashrc")
 }
 
 /// `set -o pipefail; curl … | <runner>` — a curl-pipe-shell installer that fails
@@ -264,22 +248,10 @@ mod tests {
     }
 
     #[test]
-    fn legacy_bashrc_lines_are_exact_old_strings() {
-        assert_eq!(
-            legacy_bashrc_lines("/home/u"),
-            vec![
-                r#"eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)""#.to_string(),
-                r#"eval "$(/home/u/.local/bin/mise activate bash)""#.to_string(),
-            ]
-        );
-    }
-
-    #[test]
     fn paths_are_home_relative() {
         assert_eq!(mise_bin("/home/u"), "/home/u/.local/bin/mise");
         assert_eq!(mise_shims_dir("/home/u"), "/home/u/.local/share/mise/shims");
         assert_eq!(profile_path("/home/u"), "/home/u/.profile");
-        assert_eq!(bashrc_path("/home/u"), "/home/u/.bashrc");
         assert_eq!(workspace_path("/home/u"), "/home/u/workspaces/default");
     }
 

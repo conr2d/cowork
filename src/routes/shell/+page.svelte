@@ -51,8 +51,8 @@
 
 	onMount(() => {
 		void (async () => {
-			// Upgrade healing: an app upgrade leaves a stale injected guest behind
-			// (missing subcommands, old protocol). Sync before anything probes it.
+			// Sync before anything probes the guest: a rebuilt app or a missing/corrupt
+			// installed binary must re-inject the shipped bytes into the distro.
 			// Best-effort: a failed sync still boots; guest calls surface real errors.
 			await tauriHost.guestSync().catch(() => {});
 			await shell.load();

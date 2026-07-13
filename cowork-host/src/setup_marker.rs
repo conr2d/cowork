@@ -1,12 +1,10 @@
 //! v0.2 WP2a: the setup-complete marker. Written once the wizard finishes;
 //! its presence routes the app into the shell instead of the wizard at boot.
-//! Presence-based: the JSON body (`{"version":1}`) is reserved for future
-//! schema needs and is not validated on read.
+//! Presence is the whole signal; the marker file has no body.
 
 use std::path::Path;
 
 use cowork_errors::{Code, Envelope, Stage};
-use serde::Serialize;
 
 /// True if setup has completed on this machine (the marker file exists).
 pub fn is_setup_complete(path: &Path) -> bool {
@@ -21,15 +19,8 @@ pub fn mark_setup_complete(path: &Path) -> Result<(), Envelope> {
             .map_err(|e| setup_marker_error(format!("create {}: {e}", parent.display())))?;
     }
 
-    #[derive(Serialize)]
-    struct Marker {
-        version: u32,
-    }
-
-    let tmp = path.with_extension("json.tmp");
-    let raw = serde_json::to_string(&Marker { version: 1 })
-        .map_err(|e| setup_marker_error(format!("serialize {}: {e}", path.display())))?;
-    std::fs::write(&tmp, raw)
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, b"")
         .map_err(|e| setup_marker_error(format!("write {}: {e}", tmp.display())))?;
     std::fs::rename(&tmp, path).map_err(|e| {
         setup_marker_error(format!(

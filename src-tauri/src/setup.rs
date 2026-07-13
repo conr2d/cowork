@@ -76,8 +76,8 @@ fn resume_state_path() -> Result<PathBuf, Envelope> {
     Ok(dir)
 }
 
-/// `%LOCALAPPDATA%\Cowork\setup-complete.json` — written when the wizard
-/// finishes; its presence boots the app into the shell.
+/// `%LOCALAPPDATA%\Cowork\setup-complete` — written when the wizard finishes;
+/// its presence boots the app into the shell. Empty: presence is the signal.
 fn setup_marker_path() -> Result<PathBuf, Envelope> {
     let base = std::env::var_os("LOCALAPPDATA").ok_or_else(|| {
         Envelope::new(Code::HostSetupMarkerFailed, Stage::Done)
@@ -85,7 +85,7 @@ fn setup_marker_path() -> Result<PathBuf, Envelope> {
     })?;
     let mut dir = PathBuf::from(base);
     dir.push("Cowork");
-    dir.push("setup-complete.json");
+    dir.push("setup-complete");
     Ok(dir)
 }
 
@@ -208,9 +208,10 @@ pub async fn provision_run() -> Result<ProvisionDto, Envelope> {
     .map_err(join_envelope(Stage::Provision))?
 }
 
-/// Upgrade healing: re-inject the embedded guest CLI when the distro's
-/// installed copy differs (an app upgrade leaves a stale guest behind —
-/// missing subcommands, old protocol). Called by the shell at boot.
+/// Shell-boot guest sync: re-inject the embedded guest CLI when the distro's
+/// installed copy differs. This is how rebuilt app bytes reach an
+/// already-provisioned distro, and how a missing/corrupt guest self-heals.
+/// Called by the shell at boot.
 /// Returns whether an injection ran.
 #[tauri::command]
 pub async fn guest_sync() -> Result<bool, Envelope> {

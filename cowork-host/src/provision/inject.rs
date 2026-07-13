@@ -43,9 +43,8 @@ pub fn chmod_args() -> Vec<String> {
     ]
 }
 
-/// Stale-guest check (upgrade healing): re-inject unless the installed guest
-/// byte-matches the shipped one. A missing/unreadable installed binary counts
-/// as stale.
+/// Stale-guest check: re-inject unless the installed guest byte-matches the
+/// shipped one. A missing/unreadable installed binary counts as stale.
 pub fn needs_inject(shipped: &[u8], installed: Option<&[u8]>) -> bool {
     installed != Some(shipped)
 }

@@ -20,7 +20,7 @@ export interface HostClient {
 	preflightRun(): Promise<PreflightReport>;
 	wslEnable(selectedAgents: AgentId[]): Promise<WslEnableDto>;
 	provisionRun(): Promise<ProvisionDto>;
-	/** Re-inject the guest CLI if the installed copy is stale (app upgrade). */
+	/** Re-inject the guest CLI if the installed copy is stale. */
 	guestSync(): Promise<boolean>;
 	guestBootstrap(onProgress: (event: ProgressEvent) => void): Promise<void>;
 	guestAgentInstall(agents: AgentId[], onProgress: (event: ProgressEvent) => void): Promise<void>;

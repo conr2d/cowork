@@ -44,11 +44,11 @@ pub fn inject_guest(src_binary: &str) -> Result<(), Envelope> {
     }
 }
 
-/// Upgrade healing (shell boot): re-inject the guest CLI when the installed
-/// binary differs from the shipped one. Returns whether an injection ran.
-/// An unreadable installed binary (missing file, distro not yet started in a
-/// broken state) counts as stale; a failed read of the SHIPPED binary is a
-/// real error.
+/// Shell-boot guest sync: re-inject the guest CLI when the installed binary
+/// differs from the shipped one. This is how rebuilt app bytes reach an
+/// already-provisioned distro, and how a missing/corrupt installed guest
+/// self-heals. Returns whether an injection ran. An unreadable installed
+/// binary counts as stale; a failed read of the shipped binary is a real error.
 pub fn sync_guest(src_binary: &str) -> Result<bool, Envelope> {
     let shipped = std::fs::read(src_binary)
         .map_err(|e| cli_inject_failed_envelope(&format!("read shipped {src_binary}: {e}")))?;

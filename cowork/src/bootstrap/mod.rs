@@ -166,9 +166,8 @@ fn run_steps(
     Ok(())
 }
 
-/// Append each activation line that is not already present, then strip the
-/// activation lines older versions wrote to `~/.bashrc` (they are dead there —
-/// see `command::profile_lines` — and would double the PATH entries).
+/// Append each activation line to `~/.profile` only when that exact line is not
+/// already present. This keeps the bootstrap idempotent across re-runs.
 fn ensure_profile(ops: &mut dyn BootstrapOps, home: &str) -> Result<(), Envelope> {
     let file = command::profile_path(home);
     let existing = ops.read_to_string(&file).unwrap_or_default();
@@ -179,27 +178,6 @@ fn ensure_profile(ops: &mut dyn BootstrapOps, home: &str) -> Result<(), Envelope
         if let Err(e) = ops.append_line(&file, &line) {
             return Err(command::profile_write_failed_envelope(&file).with_cause(&e));
         }
-    }
-
-    let bashrc = command::bashrc_path(home);
-    let Some(existing_bashrc) = ops.read_to_string(&bashrc) else {
-        return Ok(());
-    };
-    let legacy = command::legacy_bashrc_lines(home);
-    let kept: Vec<&str> = existing_bashrc
-        .lines()
-        .filter(|line| !legacy.iter().any(|old| line.trim() == old))
-        .collect();
-    if kept.len() == existing_bashrc.lines().count() {
-        return Ok(());
-    }
-    let rewritten = if kept.is_empty() {
-        String::new()
-    } else {
-        format!("{}\n", kept.join("\n"))
-    };
-    if let Err(e) = ops.write_file(&bashrc, &rewritten) {
-        return Err(command::profile_write_failed_envelope(&bashrc).with_cause(&e));
     }
     Ok(())
 }
@@ -274,10 +252,8 @@ mod tests {
         files: HashMap<String, String>,
         fail: HashMap<String, i32>,
         append_fail: bool,
-        write_fail: bool,
         dir_fail_paths: HashSet<String>,
         runs: Vec<Cmd>,
-        writes: Vec<String>,
         dirs: Vec<String>,
     }
 
@@ -288,10 +264,8 @@ mod tests {
                 files: HashMap::new(),
                 fail: HashMap::new(),
                 append_fail: false,
-                write_fail: false,
                 dir_fail_paths: HashSet::new(),
                 runs: Vec::new(),
-                writes: Vec::new(),
                 dirs: Vec::new(),
             }
         }
@@ -361,15 +335,6 @@ mod tests {
             let entry = self.files.entry(path.to_string()).or_default();
             entry.push_str(line);
             entry.push('\n');
-            Ok(())
-        }
-
-        fn write_file(&mut self, path: &str, contents: &str) -> Result<(), String> {
-            if self.write_fail {
-                return Err("write denied".to_string());
-            }
-            self.writes.push(path.to_string());
-            self.files.insert(path.to_string(), contents.to_string());
             Ok(())
         }
 
@@ -482,44 +447,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn legacy_bashrc_lines_are_removed_and_other_lines_preserved() {
-        let mut ops = MockOps::new();
-        let bashrc = command::bashrc_path("/home/u");
-        ops.files.insert(
-            bashrc.clone(),
-            format!(
-                "keep before\n{}\n{}\nkeep after\n",
-                command::legacy_bashrc_lines("/home/u")[0],
-                command::legacy_bashrc_lines("/home/u")[1]
-            ),
-        );
-        let mut sink = CollectingSink::default();
-        let out = run_bootstrap(&mut ops, &mut sink, &config());
-        assert!(matches!(out, BootstrapOutcome::Done));
-        assert_eq!(
-            ops.files.get(&bashrc).map(String::as_str),
-            Some("keep before\nkeep after\n")
-        );
-        assert_eq!(ops.writes, vec![bashrc]);
-    }
-
-    #[test]
-    fn bashrc_without_legacy_lines_is_not_written() {
-        let mut ops = MockOps::new();
-        let bashrc = command::bashrc_path("/home/u");
-        ops.files
-            .insert(bashrc.clone(), "keep before\nkeep after\n".to_string());
-        let mut sink = CollectingSink::default();
-        let out = run_bootstrap(&mut ops, &mut sink, &config());
-        assert!(matches!(out, BootstrapOutcome::Done));
-        assert!(ops.writes.is_empty());
-        assert_eq!(
-            ops.files.get(&bashrc).map(String::as_str),
-            Some("keep before\nkeep after\n")
-        );
-    }
-
     fn assert_failed_with(out: BootstrapOutcome, expected: cowork_errors::Code) {
         match out {
             BootstrapOutcome::Failed(env) => assert_eq!(env.code, expected),
@@ -569,20 +496,6 @@ mod tests {
     fn profile_append_failure_maps_to_profile_code() {
         let mut ops = MockOps::new();
         ops.append_fail = true;
-        let mut sink = CollectingSink::default();
-        let out = run_bootstrap(&mut ops, &mut sink, &config());
-        assert_failed_with(out, cowork_errors::Code::ToolchainProfileWriteFailed);
-    }
-
-    #[test]
-    fn bashrc_write_failure_maps_to_profile_code() {
-        let mut ops = MockOps::new();
-        let bashrc = command::bashrc_path("/home/u");
-        ops.files.insert(
-            bashrc,
-            format!("{}\n", command::legacy_bashrc_lines("/home/u")[0]),
-        );
-        ops.write_fail = true;
         let mut sink = CollectingSink::default();
         let out = run_bootstrap(&mut ops, &mut sink, &config());
         assert_failed_with(out, cowork_errors::Code::ToolchainProfileWriteFailed);

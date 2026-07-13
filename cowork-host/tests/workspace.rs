@@ -55,7 +55,6 @@ fn meta(slug: &str) -> WorkspaceMeta {
             title: "Session".to_string(),
             order: 1,
         }],
-        default_provider: None,
     }
 }
 

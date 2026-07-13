@@ -26,9 +26,23 @@ Naming: brand **Cowork**; GUI **Cowork.exe**; guest CLI **`cowork`**; future dae
 
 ## Scope discipline (one goal per version)
 
-v0.1 Setup · v0.2 Isolation (bubblewrap) · v0.3 Recovery (snapshots) · v0.4 Community · v0.5 Observability + budget.
+v0.1 Setup · v0.2 Workspace · v0.3 Isolation · v0.4 Recovery · v0.5 Community · v0.6 Observability + budget.
 
-**Do NOT** implement isolation, recovery, observability, budgets, community, or a credential vault in v0.1. Credentials stay at each agent's default path inside the distro, which is the isolation boundary; a credential vault remains out of scope.
+**Do NOT** implement a later version's goal early. Credentials stay at each agent's default path inside the distro, which is the isolation boundary; a credential vault remains out of scope.
+
+## Work intake — file it, do not fix it
+
+**Defects and ideas go to GitHub Issues, never straight to a fix.** A conversation is not durable storage: anything held only in an agent's context is lost at the end of the session, and fixing on discovery is what kept the v0.2 gate from ever finishing (each fix invalidated the installer and restarted the run — see `docs/v0.2-full-gate.md` §0).
+
+- Before starting work: `gh issue list`. Do not rediscover what is already filed.
+- On finding a defect or having an idea **mid-task**: `gh issue create`, then carry on with the task you were on. Do not detour.
+- **Milestones are versions** (`v0.2 — Workspace`, `v0.3 — Isolation`). Labels are orthogonal and reusable, so they do not accumulate per release:
+  - `gate-blocker` — blocks closing the current version (passes the bug bar in the gate runbook §0)
+  - `polish` — rough, but setup still completes; does not block
+  - `design` — absorbed by the design overhaul
+  - `spike` — investigation needed before a design decision
+  - `idea` — not committed to a version yet
+- The **only** thing that may be fixed on discovery is a `gate-blocker` — and only after it is filed.
 
 ## i18n & errors
 

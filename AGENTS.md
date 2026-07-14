@@ -18,7 +18,7 @@ Windows host (Tauri v2 → Cowork.exe) — host driver:
 
 WSL guest (vanilla Ubuntu) — host-agnostic:
 ├── `cowork` CLI (Rust): apt prereqs → Linuxbrew → mise → Node (codex only) → agent install
-│      emits JSON-lines progress; owns ~/.default-npm-packages and ~/.cowork/creds routing
+│      emits JSON-lines progress; owns ~/.default-npm-packages
 └── agents: claude (native installer) · antigravity `agy` (native installer) · codex (npm via mise)
 ```
 
@@ -26,9 +26,23 @@ Naming: brand **Cowork**; GUI **Cowork.exe**; guest CLI **`cowork`**; future dae
 
 ## Scope discipline (one goal per version)
 
-v0.1 Setup · v0.2 Isolation (bubblewrap) · v0.3 Recovery (snapshots) · v0.4 Community · v0.5 Observability + budget.
+v0.1 Setup · v0.2 Workspace · v0.3 Isolation · v0.4 Recovery · v0.5 Community · v0.6 Observability + budget.
 
-**Do NOT** implement isolation, recovery, observability, budgets, community, or a credential vault in v0.1. Credentials are merely *routed* to `~/.cowork/creds` (not encrypted) to avoid breaking changes when v0.2/v0.3 land.
+**Do NOT** implement a later version's goal early. Credentials stay at each agent's default path inside the distro, which is the isolation boundary; a credential vault remains out of scope.
+
+## Work intake — file it, do not fix it
+
+**Defects and ideas go to GitHub Issues, never straight to a fix.** A conversation is not durable storage: anything held only in an agent's context is lost at the end of the session, and fixing on discovery is what kept the v0.2 gate from ever finishing (each fix invalidated the installer and restarted the run — see `docs/v0.2-full-gate.md` §0).
+
+- Before starting work: `gh issue list`. Do not rediscover what is already filed.
+- On finding a defect or having an idea **mid-task**: `gh issue create`, then carry on with the task you were on. Do not detour.
+- **Milestones are versions** (`v0.2 — Workspace`, `v0.3 — Isolation`). Labels are orthogonal and reusable, so they do not accumulate per release:
+  - `gate-blocker` — blocks closing the current version (passes the bug bar in the gate runbook §0)
+  - `polish` — rough, but setup still completes; does not block
+  - `design` — absorbed by the design overhaul
+  - `spike` — investigation needed before a design decision
+  - `idea` — not committed to a version yet
+- The **only** thing that may be fixed on discovery is a `gate-blocker` — and only after it is filed.
 
 ## i18n & errors
 
@@ -60,11 +74,39 @@ Functional "done" is not enough — these guard against implementation drift fro
 
 **Usability (the real risk is the user, not the tech):** every user-facing error renders a plain-language localized title + body + concrete next action — never a raw code or English stack. Final gate: a real non-developer completes setup unaided, time-boxed, observed.
 
+## Branch discipline — `main` is never pushed to directly
+
+**No one commits to `main`. Ever.** Not the author, not the reviewer, not for a one-line fix.
+The v0.2 gate was run against `main` directly, and the result was a history where half the
+commits exist only to repair the other half — three of them blockers manufactured by the fixes
+themselves. That history had to be rewritten. It is the last time.
+
+The loop, per unit of work:
+
+1. **Branch.** `git switch -c fix/<issue>-<slug>` (or `feat/…`, `docs/…`) off `main`. A unit is
+   normally one issue. Use a **git worktree** when an author agent needs to build while `main`
+   stays usable.
+2. **Author.** The author (usually Codex, via a deterministic spec) commits freely on the
+   branch. **Flailing on a branch is fine** — that is what the branch is for. Do not amend, do
+   not curate; just get it right.
+3. **Review.** A *separate context* cold-reviews the diff and runs the full battery. Review
+   fixes are more commits on the branch, not amendments.
+4. **Seal.** `gh pr create`, let CI run, then **squash-merge**. The squash message is the
+   reviewed unit's message — one intent line, the reasoning, the measurements. **The branch's
+   back-and-forth collapses and never reaches `main`.**
+5. Delete the branch.
+
+So `main` only ever contains sealed, reviewed, green units — one commit each. The archaeology
+lives in the PR, where it belongs, and nobody has to rewrite history to get a readable log.
+
+**Squash-merge is the mechanism that enforces "flailing does not ship".** Do not merge-commit,
+do not rebase-merge.
+
 ## Commit discipline
 
 - **1 commit = one meaningful feature unit** — the smallest change that compiles, passes tests + automated conformance, is independently reviewable, and does one thing (one intent line; if you need "and", split). A WP is a branch/milestone, not one commit.
 - **Seal a unit only after** its functional DoD + automated conformance + a separate-context review sign-off. Never seal broken or unreviewed units.
-- **Review fixes fold into the unit** — `git commit --amend` (or `git reset --soft <unit-base>` + recommit) **before push/merge**; `git rebase -i` is unavailable here. History shows the reviewed-final state, not the back-and-forth.
+- **Review fixes are commits on the branch**, not amendments. The squash-merge collapses them, so `main` shows the reviewed-final state and the PR keeps the back-and-forth.
 - **Exception — noteworthy fix = its own commit** when it: (a) corrects a wrong plan assumption, (b) is a non-obvious gotcha future work would re-hit (esp. external-tool / "fragile path" quirks), (c) changes a conformance rule or forward-dependency, or (d) is a workaround worth remembering. Put the lesson in the body / a `Lesson:` trailer.
 - **Message** = OMC protocol (intent line + body + trailers `Constraint:`/`Rejected:`/`Directive:`/`Confidence:`/`Scope-risk:`/`Not-tested:`) + a `Reviewed:` trailer + `Co-Authored-By: Claude ...`.
 - **Branch off `main`; commit per sealed unit; merge a WP** when all its units are sealed and the WP-level review passes. History hygiene may be delegated to `oh-my-claudecode:git-master`.

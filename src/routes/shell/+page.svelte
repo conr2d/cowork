@@ -204,6 +204,7 @@
 				{#if workspace && session}
 					{@const isActive =
 						ref.slug === shell.activeSlug && manager.activeOf(ref.slug) === session.id}
+					{@const launch = manager.launchPlan(session.id, session.agentSessionUuid ?? null)}
 					<div class="term-slot" class:is-active={isActive}>
 						<Terminal
 							sessionId={session.id}
@@ -213,11 +214,7 @@
 							{theme}
 							active={isActive}
 							detectLinks
-							autorun={sessionLaunch(
-								session.agent,
-								manager.launchUuid(session.id, session.agentSessionUuid ?? null),
-								manager.isRestore(session.id)
-							)}
+							autorun={sessionLaunch(session.agent, launch.uuid, launch.resume)}
 							onactivity={(event) => manager.noteActivity(session.id, event)}
 							onspawn={() => manager.noteSpawn(session.id)}
 						/>

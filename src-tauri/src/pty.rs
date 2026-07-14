@@ -8,6 +8,7 @@
 //! off-Windows).
 
 use std::io::Read;
+use std::sync::{Arc, Mutex};
 
 use base64::Engine;
 use cowork_errors::{Code, Envelope, Stage};
@@ -30,10 +31,11 @@ const READ_CHUNK: usize = 4096;
 /// distro at `workspace`. The frontend creates `onData` (a `Channel<String>`)
 /// and passes the already-fitted `rows`/`cols`, so the ConPTY is the correct
 /// size from the first byte (never hardcode a default — that corrupts the first
-/// frame of full-screen TUIs). Optional `autorun` is written host-side as part
-/// of the same spawn step, so retries replay the launch command without a
-/// frontend-side race. Each `onData` message is base64 of one raw PTY output
-/// chunk; the frontend base64-decodes to bytes and writes them to xterm.
+/// frame of full-screen TUIs). Optional `autorun` stays attached to the spawn
+/// request so retries replay the launch command without a frontend-side race,
+/// but the actual write is deferred until the shell emits its first output.
+/// Each `onData` message is base64 of one raw PTY output chunk; the frontend
+/// base64-decodes to bytes and writes them to xterm.
 // A Tauri command's parameter list IS the IPC payload; grouping these into a
 // struct would only hide the same fields behind an indirection the frontend
 // would still have to spell out.
@@ -53,12 +55,6 @@ pub fn pty_spawn(
     validate_session_id(&id, STAGE)?;
     let cmd = terminal_launch(&distro, &workspace, &locale);
     let mut session = WindowsPtySession::spawn(&cmd, rows, cols, STAGE)?;
-    if let Some(autorun) = autorun {
-        if let Err(error) = session.write_input(format!("{autorun}\n").as_bytes(), STAGE) {
-            let _ = session.kill(STAGE);
-            return Err(error);
-        }
-    }
     let reader = match session.take_reader() {
         Some(reader) => reader,
         None => {
@@ -68,23 +64,35 @@ pub fn pty_spawn(
         }
     };
 
-    if let Some(previous) = state.insert(id, session) {
+    if let Some(previous) = state.insert(id.clone(), session) {
         let _ = previous
             .lock()
             .expect("PtyRegistry session mutex poisoned")
             .kill(STAGE);
     }
+    // Not `expect`: kill_all runs off the window-destroy handler, so the session
+    // we just inserted can legitimately be gone by now. Losing an autorun is not
+    // worth panicking a Tauri command over — the pump still streams whatever the
+    // shell prints.
+    let session = state.get(&id);
 
     // Pump PTY output → channel on a dedicated thread. The reader is an
     // independent handle from the writer/master kept in state, so the pump never
-    // contends on the state mutex.
-    std::thread::spawn(move || pump(reader, on_data));
+    // contends on the state mutex. The first output chunk marks the shell as
+    // ready to read, so that is when we replay the deferred autorun exactly
+    // once.
+    std::thread::spawn(move || pump(reader, on_data, session, autorun));
     Ok(())
 }
 
 /// Read loop: base64-frame each chunk onto the channel until EOF or the channel
 /// is dropped by the frontend.
-fn pump(mut reader: Box<dyn Read + Send>, on_data: Channel<String>) {
+fn pump(
+    mut reader: Box<dyn Read + Send>,
+    on_data: Channel<String>,
+    session: Option<Arc<Mutex<WindowsPtySession>>>,
+    mut autorun: Option<String>,
+) {
     let mut buf = [0u8; READ_CHUNK];
     loop {
         match reader.read(&mut buf) {
@@ -93,6 +101,19 @@ fn pump(mut reader: Box<dyn Read + Send>, on_data: Channel<String>) {
                 let encoded = base64::engine::general_purpose::STANDARD.encode(&buf[..n]);
                 if on_data.send(encoded).is_err() {
                     break;
+                }
+                // The first chunk is the shell's prompt: it is now reading stdin.
+                // Writing the launch command any earlier lets the tty echo it once
+                // and readline echo it again when bash finally reads the buffer.
+                if let (Some(session), Some(autorun)) = (session.as_ref(), autorun.take()) {
+                    if session
+                        .lock()
+                        .expect("PtyRegistry session mutex poisoned")
+                        .write_input(format!("{autorun}\n").as_bytes(), STAGE)
+                        .is_err()
+                    {
+                        break;
+                    }
                 }
             }
         }

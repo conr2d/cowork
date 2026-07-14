@@ -8,7 +8,8 @@ import {
 	nextSessionOrder,
 	nextSessionTitle,
 	pruneOpen,
-	resolveRestoreUuid,
+	resolveSessionLaunch,
+	type SessionLaunchPlan,
 	type SessionRef,
 	type SessionStatus,
 	sortedSessions
@@ -27,9 +28,7 @@ export interface SessionManager {
 	/** Workspace slug an undismissed concurrent-session advisory points at. */
 	readonly advisorySlug: string | null;
 	activeOf(slug: string): string | null;
-	/** Restored sessions (not created this app run) spawn with the agent's resume. */
-	isRestore(sessionId: string): boolean;
-	launchUuid(sessionId: string, fallback: string | null): string | null;
+	launchPlan(sessionId: string, fallbackUuid: string | null): SessionLaunchPlan;
 	/** Workspace became active: create its first session or activate its current tab. */
 	ensureActive(workspace: WorkspaceDto): Promise<void>;
 	/** ⊕ / picker: create + persist + activate. agent=null → the workspace default. */
@@ -58,7 +57,7 @@ export function createSessionManager(
 	const timers = new SvelteMap<string, ReturnType<typeof setTimeout>>();
 	const spawnedAt = new SvelteMap<string, number>();
 	const capturing = new SvelteSet<string>();
-	const launchUuids = new SvelteMap<string, string | null>();
+	const launchPlans = new SvelteMap<string, SessionLaunchPlan>();
 	/**
 	 * Sessions whose `activate` is in flight. `activate` awaits (the claude
 	 * session-existence probe, the agy theme sync) between deciding to mount and
@@ -118,20 +117,20 @@ export function createSessionManager(
 		mounting.add(sessionId);
 		try {
 			let session = workspace.sessions.find((item) => item.id === sessionId);
-			const launchUuid = session
-				? await resolveRestoreUuid(host, session, !fresh.has(sessionId), async () => {
+			const launchPlan = session
+				? await resolveSessionLaunch(host, session, !fresh.has(sessionId), async (uuid) => {
 						const current = resolveSession(workspace.slug, sessionId);
 						if (!current.workspace || !current.session) return;
 						await shell.updateSessions(
 							current.workspace.slug,
 							current.workspace.sessions.map((item) =>
-								item.id === sessionId ? { ...item, agentSessionUuid: null } : item
+								item.id === sessionId ? { ...item, agentSessionUuid: uuid } : item
 							)
 						);
 						session = resolveSession(workspace.slug, sessionId).session ?? session;
 					})
-				: null;
-			launchUuids.set(sessionId, launchUuid);
+				: { uuid: null, resume: false };
+			launchPlans.set(sessionId, launchPlan);
 			if (session?.agent === 'antigravity') {
 				try {
 					await host.agentThemeSync(theme());
@@ -193,11 +192,8 @@ export function createSessionManager(
 		activeOf(slug) {
 			return activeBySlug[slug] ?? null;
 		},
-		isRestore(sessionId) {
-			return !fresh.has(sessionId);
-		},
-		launchUuid(sessionId, fallback) {
-			return launchUuids.has(sessionId) ? launchUuids.get(sessionId)! : fallback;
+		launchPlan(sessionId, fallbackUuid) {
+			return launchPlans.get(sessionId) ?? { uuid: fallbackUuid, resume: false };
 		},
 		async ensureActive(workspace) {
 			if (workspace.sessions.length === 0) {
@@ -217,7 +213,7 @@ export function createSessionManager(
 			fresh.delete(sessionId);
 			spawnedAt.delete(sessionId);
 			capturing.delete(sessionId);
-			launchUuids.delete(sessionId);
+			launchPlans.delete(sessionId);
 			clearTimer(sessionId);
 			delete statuses[sessionId];
 			await shell.updateSessions(
@@ -246,8 +242,8 @@ export function createSessionManager(
 				workspaces
 			);
 			open = next;
-			for (const sessionId of launchUuids.keys()) {
-				if (!next.some((ref) => ref.sessionId === sessionId)) launchUuids.delete(sessionId);
+			for (const sessionId of launchPlans.keys()) {
+				if (!next.some((ref) => ref.sessionId === sessionId)) launchPlans.delete(sessionId);
 			}
 		},
 		noteSpawn(sessionId) {

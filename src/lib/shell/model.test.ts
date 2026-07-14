@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { SessionDto, WorkspaceDto } from '$lib/host/types';
 import { createMockHost } from '$lib/host/mock';
@@ -10,7 +10,7 @@ import {
 	nextSessionTitle,
 	pinnedOf,
 	pruneOpen,
-	resolveRestoreUuid,
+	resolveSessionLaunch,
 	recentOf,
 	sessionLaunch,
 	sortedSessions
@@ -33,7 +33,7 @@ function workspace(
 }
 
 function session(partial: Partial<SessionDto> & Pick<SessionDto, 'id'>): SessionDto {
-	return { agent: 'claude', agentSessionUuid: null, title: 't', order: 0, ...partial };
+	return { agent: 'claude', agentSessionUuid: undefined, title: 't', order: 0, ...partial };
 }
 
 describe('brand', () => {
@@ -169,37 +169,66 @@ describe('sessionLaunch', () => {
 	});
 });
 
-describe('resolveRestoreUuid', () => {
-	it('clears a restored claude uuid and launches bare when the conversation is missing', async () => {
-		const host = createMockHost({ sessionChecks: { claude: false } });
-		const restored = session({
-			id: 's1',
-			agentSessionUuid: '550e8400-e29b-41d4-a716-446655440000'
-		});
-		let cleared: string | null = restored.agentSessionUuid ?? null;
-
-		await expect(
-			resolveRestoreUuid(host, restored, true, async () => {
-				cleared = null;
-			})
-		).resolves.toBeNull();
-		expect(cleared).toBeNull();
-	});
-
-	it('keeps a restored claude uuid when the conversation exists', async () => {
+describe('resolveSessionLaunch', () => {
+	it('resumes a restored claude session when the conversation exists', async () => {
 		const host = createMockHost({ sessionChecks: { claude: true } });
 		const restored = session({
 			id: 's1',
 			agentSessionUuid: '550e8400-e29b-41d4-a716-446655440000'
 		});
-		let cleared = false;
+		let persisted: string | null = null;
 
 		await expect(
-			resolveRestoreUuid(host, restored, true, async () => {
-				cleared = true;
+			resolveSessionLaunch(host, restored, true, async (uuid) => {
+				persisted = uuid;
 			})
-		).resolves.toBe('550e8400-e29b-41d4-a716-446655440000');
-		expect(cleared).toBe(false);
+		).resolves.toEqual({
+			uuid: '550e8400-e29b-41d4-a716-446655440000',
+			resume: true
+		});
+		expect(persisted).toBeNull();
+	});
+
+	it('re-pins a restored claude session id when the conversation is missing', async () => {
+		const host = createMockHost({ sessionChecks: { claude: false } });
+		const restored = session({
+			id: 's1',
+			agentSessionUuid: '550e8400-e29b-41d4-a716-446655440000'
+		});
+		let persisted: string | null = null;
+
+		await expect(
+			resolveSessionLaunch(host, restored, true, async (uuid) => {
+				persisted = uuid;
+			})
+		).resolves.toEqual({
+			uuid: '550e8400-e29b-41d4-a716-446655440000',
+			resume: false
+		});
+		expect(persisted).toBeNull();
+	});
+
+	it('mints and persists a claude session id when the stored uuid is absent', async () => {
+		const host = createMockHost();
+		const broken = session({ id: 's1' });
+		let persisted: string | null = null;
+		const randomUuid = vi
+			.spyOn(globalThis.crypto, 'randomUUID')
+			.mockReturnValue('550e8400-e29b-41d4-a716-446655440001');
+
+		try {
+			await expect(
+				resolveSessionLaunch(host, broken, true, async (uuid) => {
+					persisted = uuid;
+				})
+			).resolves.toEqual({
+				uuid: '550e8400-e29b-41d4-a716-446655440001',
+				resume: false
+			});
+			expect(persisted).toBe('550e8400-e29b-41d4-a716-446655440001');
+		} finally {
+			randomUuid.mockRestore();
+		}
 	});
 
 	it('falls back to the stored claude uuid when the probe fails', async () => {
@@ -209,14 +238,17 @@ describe('resolveRestoreUuid', () => {
 			id: 's1',
 			agentSessionUuid: '550e8400-e29b-41d4-a716-446655440000'
 		});
-		let cleared = false;
+		let persisted: string | null = null;
 
 		await expect(
-			resolveRestoreUuid(host, restored, true, async () => {
-				cleared = true;
+			resolveSessionLaunch(host, restored, true, async (uuid) => {
+				persisted = uuid;
 			})
-		).resolves.toBe('550e8400-e29b-41d4-a716-446655440000');
-		expect(cleared).toBe(false);
+		).resolves.toEqual({
+			uuid: '550e8400-e29b-41d4-a716-446655440000',
+			resume: true
+		});
+		expect(persisted).toBeNull();
 	});
 });
 

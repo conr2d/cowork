@@ -77,46 +77,51 @@ export function nextSessionTitle(sessions: readonly SessionDto[], agent: AgentId
 	return `${brand(agent)} ${count + 1}`;
 }
 
-export async function resolveRestoreUuid(
+export interface SessionLaunchPlan {
+	uuid: string | null;
+	resume: boolean;
+}
+
+export async function resolveSessionLaunch(
 	host: HostClient,
 	session: SessionDto,
 	restore: boolean,
-	persistClearedUuid: () => Promise<void>
-): Promise<string | null> {
+	persistClaudeUuid: (uuid: string) => Promise<void>
+): Promise<SessionLaunchPlan> {
 	const launchUuid = session.agentSessionUuid ?? null;
-	if (!restore || session.agent !== 'claude' || launchUuid === null) return launchUuid;
+	if (session.agent !== 'claude') {
+		return { uuid: launchUuid, resume: restore && launchUuid !== null };
+	}
+	if (launchUuid === null) {
+		const mintedUuid = crypto.randomUUID();
+		await persistClaudeUuid(mintedUuid);
+		return { uuid: mintedUuid, resume: false };
+	}
+	if (!restore) return { uuid: launchUuid, resume: false };
 	try {
 		const exists = await host.sessionCheck(session.agent, launchUuid);
-		if (!exists) {
-			try {
-				await persistClearedUuid();
-			} catch {
-				// Best-effort: a failed clear must not block the current bare launch.
-			}
-			return null;
-		}
+		return { uuid: launchUuid, resume: exists };
 	} catch {
 		// Best-effort: a failed probe must not block a working resume.
+		return { uuid: launchUuid, resume: true };
 	}
-	return launchUuid;
 }
 
 /**
  * The command autorun at PTY spawn for a session. Fresh claude sessions pin a
  * host-generated UUID (--session-id) so a later restore can resume; codex and
  * antigravity UUIDs are captured lazily after first activity, so a fresh spawn
- * is bare and only a restore resumes. Claude restores may clear a stale stored
- * UUID before spawn when the conversation file never materialized.
+ * is bare and only a restore resumes.
  */
-export function sessionLaunch(agent: AgentId, uuid: string | null, restore: boolean): string {
+export function sessionLaunch(agent: AgentId, uuid: string | null, resume: boolean): string {
 	if (uuid === null) return agentBinary(agent);
 	switch (agent) {
 		case 'claude':
-			return restore ? `claude --resume ${uuid}` : `claude --session-id ${uuid}`;
+			return resume ? `claude --resume ${uuid}` : `claude --session-id ${uuid}`;
 		case 'codex':
-			return restore ? `codex resume ${uuid}` : agentBinary(agent);
+			return resume ? `codex resume ${uuid}` : agentBinary(agent);
 		case 'antigravity':
-			return restore ? `agy --conversation ${uuid}` : agentBinary(agent);
+			return resume ? `agy --conversation ${uuid}` : agentBinary(agent);
 	}
 }
 

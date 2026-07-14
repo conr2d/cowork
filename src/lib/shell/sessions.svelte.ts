@@ -59,6 +59,15 @@ export function createSessionManager(
 	const spawnedAt = new SvelteMap<string, number>();
 	const capturing = new SvelteSet<string>();
 	const launchUuids = new SvelteMap<string, string | null>();
+	/**
+	 * Sessions whose `activate` is in flight. `activate` awaits (the claude
+	 * session-existence probe, the agy theme sync) between deciding to mount and
+	 * pushing to `open`, and the shell's effect can call `ensureActive` again
+	 * inside that window — both calls would pass the membership check and push,
+	 * giving `{#each ... (ref.sessionId)}` a duplicate key. This guard is set
+	 * SYNCHRONOUSLY, before the first await, so the second caller bails.
+	 */
+	const mounting = new SvelteSet<string>();
 
 	function clearTimer(sessionId: string): void {
 		const timer = timers.get(sessionId);
@@ -105,7 +114,9 @@ export function createSessionManager(
 	async function activate(workspace: WorkspaceDto, sessionId: string): Promise<void> {
 		activeBySlug[workspace.slug] = sessionId;
 		statuses[sessionId] ??= 'cold';
-		if (!open.some((ref) => ref.sessionId === sessionId)) {
+		if (open.some((ref) => ref.sessionId === sessionId) || mounting.has(sessionId)) return;
+		mounting.add(sessionId);
+		try {
 			let session = workspace.sessions.find((item) => item.id === sessionId);
 			const launchUuid = session
 				? await resolveRestoreUuid(host, session, !fresh.has(sessionId), async () => {
@@ -128,7 +139,14 @@ export function createSessionManager(
 					// Best-effort: a failed sync still mounts; the scheme may be stale.
 				}
 			}
-			open.push({ slug: workspace.slug, sessionId });
+			// Re-check after the awaits: the session may have been deleted meanwhile,
+			// and a concurrent activate may already have mounted it.
+			const still = resolveSession(workspace.slug, sessionId).session;
+			if (still && !open.some((ref) => ref.sessionId === sessionId)) {
+				open.push({ slug: workspace.slug, sessionId });
+			}
+		} finally {
+			mounting.delete(sessionId);
 		}
 	}
 

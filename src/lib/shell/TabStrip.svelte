@@ -24,10 +24,36 @@
 	} = $props();
 
 	const AGENTS: readonly AgentId[] = ['claude', 'codex', 'antigravity'];
+	const PICKER_WIDTH = 160;
+	const EDGE_GAP = 8;
+
 	let pickerOpen = $state(false);
+	let pickBtn: HTMLButtonElement | undefined = $state();
+	let pickerPos = $state({ top: 0, left: 0 });
+
+	// The actions live INSIDE the scrolling rail (⊕ sits right after the last tab,
+	// as browsers do), and that rail clips — which is what hid this menu once
+	// already. So the menu escapes every clipping ancestor with position: fixed,
+	// anchored to the button's measured rect and clamped to the window. It is
+	// closed on scroll/resize rather than re-measured, because a menu that drifts
+	// away from its button is worse than one that closes.
+	function openPicker(): void {
+		const rect = pickBtn?.getBoundingClientRect();
+		if (!rect) return;
+		const maxLeft = window.innerWidth - PICKER_WIDTH - EDGE_GAP;
+		pickerPos = {
+			top: rect.bottom + 4,
+			left: Math.max(EDGE_GAP, Math.min(rect.left, maxLeft))
+		};
+		pickerOpen = true;
+	}
 </script>
 
-<svelte:window onclick={() => (pickerOpen = false)} />
+<svelte:window
+	onclick={() => (pickerOpen = false)}
+	onresize={() => (pickerOpen = false)}
+	onscroll={() => (pickerOpen = false)}
+/>
 
 <div class="tabbar">
 	<div class="tabrail" role="tablist">
@@ -52,42 +78,49 @@
 				>
 			</div>
 		{/each}
-	</div>
-	<div class="tabactions">
-		<button type="button" class="addbtn" title={m.tab_new()} onclick={() => oncreate(null)}>
-			＋
-		</button>
-		<div class="addwrap">
+		<div class="tabactions">
+			<button type="button" class="addbtn" title={m.tab_new()} onclick={() => oncreate(null)}>
+				＋
+			</button>
 			<button
+				bind:this={pickBtn}
 				type="button"
 				class="pickbtn"
 				aria-label={m.tab_new_with()}
 				onclick={(event) => {
 					event.stopPropagation();
-					pickerOpen = !pickerOpen;
+					if (pickerOpen) pickerOpen = false;
+					else openPicker();
 				}}>▾</button
 			>
-			{#if pickerOpen}
-				<div class="picker" role="menu">
-					{#each AGENTS as agent (agent)}
-						<button
-							type="button"
-							class="picker-item"
-							class:is-default={agent === workspace.defaultAgent}
-							onclick={() => {
-								pickerOpen = false;
-								oncreate(agent);
-							}}
-						>
-							<AgentIcon {agent} />
-							<span>{brand(agent)}</span>
-						</button>
-					{/each}
-				</div>
-			{/if}
 		</div>
 	</div>
 </div>
+
+{#if pickerOpen}
+	<div
+		class="picker"
+		role="menu"
+		style:top={`${pickerPos.top}px`}
+		style:left={`${pickerPos.left}px`}
+		style:width={`${PICKER_WIDTH}px`}
+	>
+		{#each AGENTS as agent (agent)}
+			<button
+				type="button"
+				class="picker-item"
+				class:is-default={agent === workspace.defaultAgent}
+				onclick={() => {
+					pickerOpen = false;
+					oncreate(agent);
+				}}
+			>
+				<AgentIcon {agent} />
+				<span>{brand(agent)}</span>
+			</button>
+		{/each}
+	</div>
+{/if}
 
 <style>
 	.tabbar {
@@ -200,18 +233,12 @@
 		align-items: center;
 		gap: 4px;
 	}
-	.addwrap {
-		position: relative;
-		flex: 0 0 auto;
-	}
+	/* Rendered at the component root, outside the clipping rail, and positioned
+	   from the button's measured rect (see openPicker). Fixed, so no ancestor's
+	   overflow can cut it off and no ancestor's scroll can carry it away. */
 	.picker {
-		position: absolute;
-		top: calc(100% + 4px);
-		/* The actions sit at the right edge of the strip, so the menu must open
-		   LEFTWARD — anchored at left: 0 it ran off the window and was clipped. */
-		right: 0;
+		position: fixed;
 		z-index: 30;
-		min-width: 140px;
 		padding: 4px;
 		border-radius: 10px;
 		background: var(--menu-bg);

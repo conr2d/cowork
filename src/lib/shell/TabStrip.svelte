@@ -207,7 +207,9 @@
 	.picker {
 		position: absolute;
 		top: calc(100% + 4px);
-		left: 0;
+		/* The actions sit at the right edge of the strip, so the menu must open
+		   LEFTWARD — anchored at left: 0 it ran off the window and was clipped. */
+		right: 0;
 		z-index: 30;
 		min-width: 140px;
 		padding: 4px;

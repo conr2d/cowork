@@ -29,59 +29,63 @@
 
 <svelte:window onclick={() => (pickerOpen = false)} />
 
-<div class="tabbar" role="tablist">
-	{#each tabs as tab (tab.id)}
-		<div class="tab" class:is-active={tab.id === activeId}>
-			<button
-				type="button"
-				role="tab"
-				aria-selected={tab.id === activeId}
-				class="tab-main"
-				onclick={() => onactivate(tab.id)}
-			>
-				<span class="dot st-{statuses[tab.id] ?? 'cold'}" aria-hidden="true"></span>
-				<AgentIcon agent={tab.agent} />
-				<span class="tab-title">{tab.title}</span>
-			</button>
-			<button
-				type="button"
-				class="tab-close"
-				aria-label={m.tab_close()}
-				onclick={() => onclose(tab.id)}>×</button
-			>
-		</div>
-	{/each}
-	<button type="button" class="addbtn" title={m.tab_new()} onclick={() => oncreate(null)}>
-		＋
-	</button>
-	<div class="addwrap">
-		<button
-			type="button"
-			class="pickbtn"
-			aria-label={m.tab_new_with()}
-			onclick={(event) => {
-				event.stopPropagation();
-				pickerOpen = !pickerOpen;
-			}}>▾</button
-		>
-		{#if pickerOpen}
-			<div class="picker" role="menu">
-				{#each AGENTS as agent (agent)}
-					<button
-						type="button"
-						class="picker-item"
-						class:is-default={agent === workspace.defaultAgent}
-						onclick={() => {
-							pickerOpen = false;
-							oncreate(agent);
-						}}
-					>
-						<AgentIcon {agent} />
-						<span>{brand(agent)}</span>
-					</button>
-				{/each}
+<div class="tabbar">
+	<div class="tabrail" role="tablist">
+		{#each tabs as tab (tab.id)}
+			<div class="tab" class:is-active={tab.id === activeId}>
+				<button
+					type="button"
+					role="tab"
+					aria-selected={tab.id === activeId}
+					class="tab-main"
+					onclick={() => onactivate(tab.id)}
+				>
+					<span class="dot st-{statuses[tab.id] ?? 'cold'}" aria-hidden="true"></span>
+					<AgentIcon agent={tab.agent} />
+					<span class="tab-title">{tab.title}</span>
+				</button>
+				<button
+					type="button"
+					class="tab-close"
+					aria-label={m.tab_close()}
+					onclick={() => onclose(tab.id)}>×</button
+				>
 			</div>
-		{/if}
+		{/each}
+	</div>
+	<div class="tabactions">
+		<button type="button" class="addbtn" title={m.tab_new()} onclick={() => oncreate(null)}>
+			＋
+		</button>
+		<div class="addwrap">
+			<button
+				type="button"
+				class="pickbtn"
+				aria-label={m.tab_new_with()}
+				onclick={(event) => {
+					event.stopPropagation();
+					pickerOpen = !pickerOpen;
+				}}>▾</button
+			>
+			{#if pickerOpen}
+				<div class="picker" role="menu">
+					{#each AGENTS as agent (agent)}
+						<button
+							type="button"
+							class="picker-item"
+							class:is-default={agent === workspace.defaultAgent}
+							onclick={() => {
+								pickerOpen = false;
+								oncreate(agent);
+							}}
+						>
+							<AgentIcon {agent} />
+							<span>{brand(agent)}</span>
+						</button>
+					{/each}
+				</div>
+			{/if}
+		</div>
 	</div>
 </div>
 
@@ -94,7 +98,17 @@
 		padding: 0 10px;
 		border-bottom: 1px solid var(--line);
 		background: var(--paper);
-		overflow-x: auto;
+		overflow: visible;
+	}
+	.tabrail {
+		display: flex;
+		min-width: 0;
+		flex: 1 1 auto;
+		align-items: center;
+		gap: 4px;
+		overflow: auto hidden;
+		padding-bottom: 1px;
+		scrollbar-width: thin;
 	}
 	.tab {
 		display: inline-flex;
@@ -179,7 +193,12 @@
 	}
 	.pickbtn {
 		font-size: 10px;
-		margin-left: -4px;
+	}
+	.tabactions {
+		display: flex;
+		flex: 0 0 auto;
+		align-items: center;
+		gap: 4px;
 	}
 	.addwrap {
 		position: relative;

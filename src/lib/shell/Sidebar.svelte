@@ -146,6 +146,7 @@
 		flex: 0 0 auto;
 		display: flex;
 		flex-direction: column;
+		min-height: 0;
 		padding: 16px 14px;
 		gap: 4px;
 		background: var(--paper);

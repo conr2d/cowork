@@ -289,6 +289,7 @@
 		color: var(--ink);
 		background: var(--paper);
 		-webkit-font-smoothing: antialiased;
+		overflow: hidden;
 	}
 	.shell.dark {
 		--paper: #1a1916;
@@ -318,7 +319,9 @@
 		display: flex;
 		flex-direction: column;
 		min-width: 0;
+		min-height: 0;
 		background: var(--term-bg);
+		overflow: hidden;
 	}
 	.chrome {
 		position: relative;
@@ -419,6 +422,7 @@
 		min-height: 0;
 		background: var(--term-bg);
 		color: var(--term-fg);
+		overflow: hidden;
 	}
 	.term-slot {
 		position: absolute;

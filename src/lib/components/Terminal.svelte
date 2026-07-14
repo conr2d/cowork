@@ -9,6 +9,12 @@
 	import * as m from '$lib/paraglide/messages';
 	import { base64ToBytes } from '$lib/terminal/decode';
 	import { createUrlScanner } from '$lib/terminal/links';
+	import {
+		clampViewport,
+		hasSelection,
+		resolveTerminalShortcut,
+		shouldActivateLink
+	} from '$lib/terminal/ui';
 
 	const XTERM_LIGHT = {
 		background: '#faf8f5',
@@ -138,7 +144,73 @@
 		term.loadAddon(new CanvasAddon());
 	}
 
+	function currentSelection(term: XTerm): string {
+		return term.getSelection();
+	}
+
+	function currentViewport(term: XTerm) {
+		return clampViewport(term.rows, term.cols);
+	}
+
+	async function copySelection(term: XTerm): Promise<void> {
+		const selection = currentSelection(term);
+		if (!hasSelection(selection)) return;
+		await navigator.clipboard.writeText(selection);
+	}
+
+	async function pasteClipboard(term: XTerm): Promise<void> {
+		term.paste(await navigator.clipboard.readText());
+	}
+
+	async function waitForVisibleContainer(
+		node: HTMLDivElement,
+		isDisposed: () => boolean
+	): Promise<'visible' | 'disposed' | 'timed-out'> {
+		const isVisible = () => node.offsetWidth > 0 && node.offsetHeight > 0;
+		if (isVisible()) return 'visible';
+
+		return await new Promise<'visible' | 'disposed' | 'timed-out'>((resolve) => {
+			let settled = false;
+			let frame = 0;
+			let timeout = 0;
+
+			const finish = (value: 'visible' | 'disposed' | 'timed-out') => {
+				if (settled) return;
+				settled = true;
+				observer.disconnect();
+				cancelAnimationFrame(frame);
+				clearTimeout(timeout);
+				resolve(value);
+			};
+
+			const tick = () => {
+				if (isDisposed()) {
+					finish('disposed');
+					return;
+				}
+				if (isVisible()) {
+					finish('visible');
+					return;
+				}
+				frame = requestAnimationFrame(tick);
+			};
+
+			const observer = new ResizeObserver(() => {
+				if (isDisposed()) {
+					finish('disposed');
+					return;
+				}
+				if (isVisible()) finish('visible');
+			});
+
+			observer.observe(node);
+			frame = requestAnimationFrame(tick);
+			timeout = window.setTimeout(() => finish('timed-out'), 10_000);
+		});
+	}
+
 	onMount(() => {
+		let disposed = false;
 		// Init runs in an async IIFE; onMount itself must return the (sync) cleanup.
 		void (async () => {
 			try {
@@ -155,10 +227,6 @@
 					'@xterm/addon-unicode11',
 					() => import('@xterm/addon-unicode11')
 				);
-				const { ClipboardAddon } = await loadModule(
-					'@xterm/addon-clipboard',
-					() => import('@xterm/addon-clipboard')
-				);
 				const { invoke, Channel } = await loadModule(
 					'@tauri-apps/api/core',
 					() => import('@tauri-apps/api/core')
@@ -166,6 +234,10 @@
 				const { WebLinksAddon } = await loadModule(
 					'@xterm/addon-web-links',
 					() => import('@xterm/addon-web-links')
+				);
+				const { ClipboardAddon } = await loadModule(
+					'@xterm/addon-clipboard',
+					() => import('@xterm/addon-clipboard')
 				);
 
 				try {
@@ -195,7 +267,10 @@
 					// webview blocks ("Opening link blocked as opener could not be cleared").
 					// Route them to the host opener, like the plain-text links.
 					linkHandler: {
-						activate: (_event, uri) => {
+						activate: (event, uri) => {
+							if (!shouldActivateLink(event?.button ?? 0, hasSelection(currentSelection(term)))) {
+								return;
+							}
 							void openUrl?.(uri);
 						}
 					}
@@ -204,16 +279,50 @@
 
 				const fit = new FitAddon();
 				term.loadAddon(fit);
+				term.loadAddon(new ClipboardAddon());
 				term.loadAddon(new Unicode11Addon());
 				term.unicode.activeVersion = '11';
-				term.loadAddon(new ClipboardAddon());
+				// xterm runs this for keydown, keypress AND keyup. Decide once, on keydown,
+				// and make the other two follow that decision — otherwise copying clears the
+				// selection, the keypress re-evaluates with nothing selected, falls through to
+				// the PTY, and Ctrl+C kills the agent anyway: the exact bug this fixes.
+				let swallowing = false;
+				term.attachCustomKeyEventHandler((event) => {
+					if (event.type !== 'keydown') {
+						if (!swallowing) return true;
+						if (event.type === 'keyup') swallowing = false;
+						return false;
+					}
+					if (swallowing && event.repeat) {
+						event.preventDefault();
+						return false;
+					}
+
+					const action = resolveTerminalShortcut(event, hasSelection(currentSelection(term)));
+					if (action === 'pass-through') {
+						swallowing = false;
+						return true;
+					}
+
+					swallowing = true;
+					event.preventDefault();
+					const run = action === 'copy-selection' ? copySelection(term) : pasteClipboard(term);
+					void run.catch((error) => {
+						initNotice = messageFrom(error);
+						console.error(error);
+					});
+					return false;
+				});
 				// Make URLs (e.g. an agent's OAuth login link) clickable → open in the
 				// host Windows browser via the opener plugin. This is the reliable
 				// handoff: WSL-side xdg-open/$BROWSER is unreliable (wslu was archived),
 				// so the host opens the browser, not the guest.
 				if (openUrl) {
 					term.loadAddon(
-						new WebLinksAddon((_event, uri) => {
+						new WebLinksAddon((event, uri) => {
+							if (!shouldActivateLink(event?.button ?? 0, hasSelection(currentSelection(term)))) {
+								return;
+							}
 							const target = detectedUrl && detectedUrl.startsWith(uri) ? detectedUrl : uri;
 							void openUrl?.(target);
 						})
@@ -221,6 +330,19 @@
 				}
 
 				term.open(container);
+
+				const visibility = await waitForVisibleContainer(container, () => disposed);
+				if (visibility !== 'visible') {
+					if (visibility === 'timed-out') {
+						captureFailure(
+							new Error(
+								'Terminal host stayed hidden for 10 seconds and never reported a usable size.'
+							)
+						);
+					}
+					term.dispose();
+					return;
+				}
 
 				// WebGL renderer with Canvas fallback (streaming-output performance).
 				try {
@@ -249,6 +371,7 @@
 				// Fit BEFORE spawn so the ConPTY is the measured size from the first byte
 				// (a hardcoded default corrupts a full-screen TUI's first frame).
 				fit.fit();
+				const initialViewport = currentViewport(term);
 
 				const scanner = createUrlScanner();
 				const decoder = new TextDecoder();
@@ -276,15 +399,16 @@
 					distro,
 					workspace,
 					locale,
-					rows: term.rows,
-					cols: term.cols
+					rows: initialViewport.rows,
+					cols: initialViewport.cols
 				});
+				if (disposed) {
+					void invoke('pty_kill', { id: sessionId });
+					term.dispose();
+					return;
+				}
 				onspawn?.(sessionId);
 				term.focus();
-				if (autorun) {
-					await invoke('pty_write', { id: sessionId, data: `${autorun}\n` });
-				}
-
 				const dataSub = term.onData((data) => {
 					void invoke('pty_write', { id: sessionId, data });
 				});
@@ -292,7 +416,8 @@
 				const observer = new ResizeObserver(() => {
 					if (!container || container.offsetWidth === 0 || container.offsetHeight === 0) return;
 					fit.fit();
-					void invoke('pty_resize', { id: sessionId, rows: term.rows, cols: term.cols });
+					const viewport = currentViewport(term);
+					void invoke('pty_resize', { id: sessionId, rows: viewport.rows, cols: viewport.cols });
 				});
 				observer.observe(container);
 
@@ -302,11 +427,28 @@
 					void invoke('pty_kill', { id: sessionId });
 					term.dispose();
 				};
+				if (disposed) {
+					cleanup();
+					cleanup = undefined;
+					return;
+				}
+				if (autorun) {
+					await invoke('pty_write', { id: sessionId, data: `${autorun}\n` });
+					if (disposed) {
+						cleanup();
+						cleanup = undefined;
+						return;
+					}
+				}
 			} catch (error) {
 				captureFailure(error);
 				console.error(error);
 			}
 		})();
+
+		return () => {
+			disposed = true;
+		};
 	});
 
 	// Focus when this terminal's tab becomes the active one.
@@ -350,6 +492,14 @@
 		<div class="terminal-notice" class:is-dark={theme === 'dark'}>
 			<strong>Terminal notice</strong>
 			<span>{initNotice}</span>
+			<button
+				type="button"
+				class="terminal-notice-dismiss"
+				aria-label={m.auth_dismiss()}
+				onclick={() => (initNotice = null)}
+			>
+				<span aria-hidden="true">✕</span>
+			</button>
 		</div>
 	{/if}
 	{#if detectLinks && detectedUrl && openUrl}
@@ -466,6 +616,21 @@
 		align-items: center;
 		gap: 0.75rem;
 		padding: 0.5rem 0.75rem;
+	}
+	.terminal-notice-dismiss {
+		margin-left: auto;
+		flex: 0 0 auto;
+		border-radius: 0.25rem;
+		padding: 0.25rem;
+		color: var(--terminal-overlay-muted);
+	}
+	.terminal-notice-dismiss:hover {
+		color: var(--terminal-overlay-fg);
+		background: var(--terminal-overlay-panel);
+	}
+	.terminal-notice-dismiss:focus-visible {
+		outline: 2px solid var(--terminal-overlay-muted);
+		outline-offset: 1px;
 	}
 
 	/* Overlaid, not in the flex flow: the terminal must not resize when the toast

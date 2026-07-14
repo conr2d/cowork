@@ -2,8 +2,9 @@
 
 > A safe, disposable computer for AI coding agents — built for people who are not developers.
 
-**Status:** pre-release. Setup (v0.1) and Workspace (v0.2) are built and in final hardware
-validation; nothing has shipped publicly yet. See
+**Status:** pre-release, and nothing has shipped publicly yet. Setup (v0.1) and Workspace (v0.2)
+are built and **sealed against a full clean-room gate on real hardware** (2026-07-14 —
+`docs/v0.2-full-gate.md`). Design (v0.3) is next. See
 [`docs/product-brief.md`](./docs/product-brief.md) for what Cowork is and why.
 
 ## What it does
@@ -29,7 +30,7 @@ It runs on an AI subscription the user already has — no extra cost, and no mod
 | v0.3 | **Design** — the wizard, the shell and the terminal become one product |
 | v0.4 | Isolation — an environment the agent cannot reach out of |
 | v0.5 | Recovery — invisible versioning + one-click undo |
-| v0.6 | Community — template sharing |
+| v0.6 | Community — template sharing, with GitHub as the backend and none of its jargon |
 | v0.7 | Observability + budget |
 
 Foundations (isolation, recovery, observability) are deliberately **sequenced**, not bolted

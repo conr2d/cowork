@@ -6,9 +6,18 @@
 > **Authorities, when this file and another disagree:** the roadmap table in
 > [`../README.md`](../README.md); isolation in
 > [`architecture/isolation-and-platforms.md`](./architecture/isolation-and-platforms.md); working
-> rules in [`../AGENTS.md`](../AGENTS.md); the v0.1 implementation spec in [`v0.1.md`](./v0.1.md).
-> Open work is in **GitHub Issues** — milestones are versions, and nothing durable lives in an
-> agent's context.
+> rules in [`../AGENTS.md`](../AGENTS.md). Open work is in **GitHub Issues** — milestones are
+> versions, and nothing durable lives in an agent's context.
+>
+> **[`v0.1.md`](./v0.1.md) is a historical spec, not an authority.** It records what v0.1 was
+> *planned* to be, and two of its instructions were reversed during implementation: credential
+> routing to `~/.cowork/creds/` (decision 13) and the npm/Node install path for codex (decision 9).
+> Corrections are marked in place there. Read the source before following it.
+>
+> **And when this file disagrees with the source, the source wins.** The 2026-07-14 re-cut of this
+> document was itself written partly from memory and asserted an npm install path the product has
+> never had. That is the failure mode this file invites: it is plausible, it is confident, and
+> nothing recompiles when it is wrong.
 
 ## Context
 
@@ -55,13 +64,18 @@ Numbering is preserved for citability. **Struck items were reversed — read wha
    no isolation/recovery/observability in v0.1.
 2. **A Cowork-dedicated Ubuntu distro named `Cowork`. Never touch the user's existing `Ubuntu`
    distro.** Held, and the mechanism is now settled: **`wsl --import Cowork <dir> <rootfs>`** from
-   a **rootfs we build and host ourselves** (`.github/workflows/rootfs.yml` → GitHub Releases,
-   pinned URL, SHA256-verified), with `wsl --install -d Ubuntu --name Cowork` as the fallback when
-   the mirror is unreachable. *Amended:* the original text said "vanilla image, **not
-   custom-built**". We do build the image — to avoid depending on the Microsoft Store — but its
-   **contents are still vanilla**: the toolchain is bootstrapped at runtime, not baked. Baking
-   brew/mise/apt-prereqs into it is [#6](https://github.com/conr2d/cowork/issues/6), still open,
-   and is a **setup-time** decision, not an isolation one.
+   a rootfs we **re-host** (`.github/workflows/rootfs.yml` → GitHub Releases; pinned URL,
+   SHA256-verified), with **`wsl --install Ubuntu-24.04 --name Cowork --no-launch`** as the fallback
+   when the mirror is unreachable (`--no-launch` keeps first boot ours).
+   **We re-host, we do not build.** `rootfs.yml` downloads Canonical's official
+   `ubuntu-noble-wsl-amd64-wsl.rootfs.tar.gz`, verifies the pinned digest, and republishes the
+   **identical bytes** — the point is to avoid a Microsoft Store dependency, not to customise the
+   image. The toolchain is bootstrapped at runtime.
+   **Consequence for [#6](https://github.com/conr2d/cowork/issues/6)** (bake brew/mise/apt-prereqs
+   into the image): it presumes a build pipeline **that does not exist yet**. Sizing it as "add a
+   step to rootfs.yml" is wrong — it is "turn the mirror into a build first". Note also that #6 is
+   a **setup-time** decision (it deletes the slowest, flakiest stretch of first boot), not an
+   isolation one, notwithstanding its own framing.
 3. **Toolchain = Linuxbrew + mise, installed at runtime; agents installed at runtime.** Held. brew
    because much modern dev/AI tooling is Mac-first with brew-based instructions, and because brew
    installs without sudo — which is what a non-admin guest user needs, and what the isolation ladder
@@ -83,22 +97,33 @@ Numbering is preserved for citability. **Struck items were reversed — read wha
    source of truth *and* the positioning language — the product is positioned for the global market.
    Runtime = Windows-locale auto-detect + a language selector on the first screen. Paraglide-JS;
    `errors.json` is the single source for error codes and is codegen'd into Rust.
-9. **Agent install methods.** Held, with one change:
+9. **Agent install methods.** ~~mise-managed Node + `@openai/codex` for codex; `~/.default-npm-packages`
+   as the npm source of truth.~~ **Reversed before it was ever built (re-spiked 2026-06-04, `f6159b2`).**
+   **All three agents install from their own native installer. Nothing in the guest needs Node or npm.**
    - **claude** → `curl -fsSL https://claude.ai/install.sh | bash` → `~/.local/bin/claude`;
-     self-updating; no Node.
+     self-updating.
    - **antigravity** → `curl -fsSL https://antigravity.google/cli/install.sh | bash` → `agy` in
-     `~/.local/bin`; Go, not npm; self-updates via `agy update`.
-   - **codex** → mise-managed Node + `@openai/codex` — the **only** Node-dependent agent. Never the
-     unscoped `codex` package.
-   - **Node** = mise, Node 24 LTS, exact patch pinned; installed **only if codex is selected**.
-   - **npm globals source of truth** = `~/.default-npm-packages`, owned by the `cowork` CLI.
+     `~/.local/bin`; a Go binary; self-updates via `agy update`.
+   - **codex** → `curl -fsSL https://chatgpt.com/codex/install.sh | sh` — a **standalone Rust
+     binary**, not npm. Run with `CODEX_NON_INTERACTIVE=1`: its installer otherwise prompts
+     `Start Codex now? [y/N]` by reading `/dev/tty` **directly**, so closing stdin does not stop
+     it and a headless install hangs. (The npm package `@openai/codex` is a `#!/usr/bin/env node`
+     shim — it would have made Node a permanent dependency. Never the unscoped `codex` package
+     either; that is an unrelated 2012 squatter.)
+   - **No Node in the guest, and no `~/.default-npm-packages`.** The bootstrap steps are exactly:
+     apt prereqs → brew → mise → shellrc → locales → workspace. Node was dropped when codex went
+     standalone, because it had no other customer.
+   - **mise is still installed, deliberately, and manages nothing of ours.** It is there *for the
+     user*: a workspace can `mise use node@…` / `python@…` without sudo. Same motive as brew — a
+     non-admin guest user must be able to install what a task needs without ever being asked for
+     root. It is not a leftover; do not remove it because it looks unused.
    - *Changed (0f03e5f):* the installer now **resolves an already-installed agent** (`bash -lc
      'command -v'`) and skips it, rather than reinstalling. Re-running setup on a provisioned
      machine is a normal path, not an error path.
-   - **Supply-chain reality:** the native installers self-update, so agents are **not version-pinned
-     by design**. Exact-pin discipline applies to the rootfs and toolchain (Ubuntu, mise, Node), not
-     to agents. Mitigation: pin the installer URLs, verify the binary exists and runs afterwards
-     (`agent.integrity_check_failed`), run installers unattended (no TTY hangs).
+   - **Supply-chain reality:** all three installers self-update, so agents are **not version-pinned
+     by design**. Exact-pin discipline applies to the rootfs only (Ubuntu). Mitigation: pin the
+     installer URLs, verify the binary exists and runs afterwards (`agent.integrity_check_failed`),
+     run installers unattended (no TTY hangs).
 10. **Naming.** Held. Brand **Cowork**; GUI **`Cowork.exe`**; in-WSL CLI **`cowork`**; future daemon
     **`coworkd`**; guest-CLI crate dir `cowork/`.
 11. **Windows-first; portability as a design invariant.** Held, and enforced in CI: the `cowork`
@@ -106,7 +131,10 @@ Numbering is preserved for citability. **Struck items were reversed — read wha
     Windows-specific code lives only in `src-tauri` and the `cfg(windows)` half of `cowork-host`. A
     later port is "write a new host driver", not a rewrite. macOS = a Linux VM (Lima), decided in the
     ADR (D1) — the *environment* is the product, and App Sandbox cannot reproduce it.
-12. **Preflight disk gate = 16 GiB hard / 32 GiB recommended.** Held.
+12. **Preflight disk gate = 16 GiB hard.** Held — but only half of it was built. The
+    "32 GiB recommended" soft tier **was never implemented**: `preflight/decide.rs` has one
+    threshold (`MIN_FREE_BYTES = 16 GiB`) and no advisory warning. Decide whether we want the soft
+    tier or whether one gate is the right answer; do not assume it is there.
 13. ~~**Agent credentials routed to `~/.cowork/creds/` from day one.**~~ **Reversed (eab7522).**
     Credentials live at **each agent's own default path** inside the distro (`~/.claude`, `~/.codex`,
     `~/.gemini/antigravity-cli/`). Central routing fought the agents' OAuth refresh, which rewrites
@@ -144,8 +172,7 @@ Numbering is preserved for citability. **Struck items were reversed — read wha
 
 ## Engineering method
 
-Development follows [`ENGINEERING_PRINCIPLES.md`](../../ENGINEERING_PRINCIPLES.md) (the portfolio
-default) and the project rules in [`../AGENTS.md`](../AGENTS.md): plan-first, verifiable Done-when,
+Development follows the project rules in [`../AGENTS.md`](../AGENTS.md): plan-first, verifiable Done-when,
 automated conformance as the commit-seal gate, a **separate-context review pass** (never
 self-approve), atomic commit discipline — and, since the v0.2 gate, **`main` is never pushed to
 directly**: branch → author → cold review → PR → squash-merge, so flailing does not ship.

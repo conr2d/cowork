@@ -17,9 +17,10 @@ Windows host (Tauri v2 → Cowork.exe) — host driver:
 └── guest-CLI injection; parses JSON-lines progress from the guest
 
 WSL guest (vanilla Ubuntu) — host-agnostic:
-├── `cowork` CLI (Rust): apt prereqs → Linuxbrew → mise → Node (codex only) → agent install
-│      emits JSON-lines progress; owns ~/.default-npm-packages
-└── agents: claude (native installer) · antigravity `agy` (native installer) · codex (npm via mise)
+├── `cowork` CLI (Rust): apt prereqs → Linuxbrew → mise → locales → workspace → agent install
+│      emits JSON-lines progress
+└── agents: all three via their own native installer — claude · antigravity `agy` · codex
+       (codex is a standalone binary; nothing here needs Node or npm)
 ```
 
 Naming: brand **Cowork**; GUI **Cowork.exe**; guest CLI **`cowork`**; future daemon **`coworkd`** (v0.5).

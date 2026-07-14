@@ -179,7 +179,7 @@ describe('resolveSessionLaunch', () => {
 		let persisted: string | null = null;
 
 		await expect(
-			resolveSessionLaunch(host, restored, true, async (uuid) => {
+			resolveSessionLaunch(host, 'demo', restored, true, async (uuid) => {
 				persisted = uuid;
 			})
 		).resolves.toEqual({
@@ -198,7 +198,7 @@ describe('resolveSessionLaunch', () => {
 		let persisted: string | null = null;
 
 		await expect(
-			resolveSessionLaunch(host, restored, true, async (uuid) => {
+			resolveSessionLaunch(host, 'demo', restored, true, async (uuid) => {
 				persisted = uuid;
 			})
 		).resolves.toEqual({
@@ -218,7 +218,7 @@ describe('resolveSessionLaunch', () => {
 
 		try {
 			await expect(
-				resolveSessionLaunch(host, broken, true, async (uuid) => {
+				resolveSessionLaunch(host, 'demo', broken, true, async (uuid) => {
 					persisted = uuid;
 				})
 			).resolves.toEqual({
@@ -241,12 +241,44 @@ describe('resolveSessionLaunch', () => {
 		let persisted: string | null = null;
 
 		await expect(
-			resolveSessionLaunch(host, restored, true, async (uuid) => {
+			resolveSessionLaunch(host, 'demo', restored, true, async (uuid) => {
 				persisted = uuid;
 			})
 		).resolves.toEqual({
 			uuid: '550e8400-e29b-41d4-a716-446655440000',
 			resume: true
+		});
+		expect(persisted).toBeNull();
+	});
+
+	it('heals a restored antigravity session from agy index when the stored uuid is absent', async () => {
+		const host = createMockHost({ sessionUuids: { antigravity: 'u1' } });
+		const restored = session({ id: 's1', agent: 'antigravity', agentSessionUuid: null });
+		let persisted: string | null = null;
+
+		await expect(
+			resolveSessionLaunch(host, 'demo', restored, true, async (uuid) => {
+				persisted = uuid;
+			})
+		).resolves.toEqual({
+			uuid: 'u1',
+			resume: true
+		});
+		expect(persisted).toBe('u1');
+	});
+
+	it('falls back to a bare restored antigravity launch when the index has no uuid', async () => {
+		const host = createMockHost({ sessionUuids: { antigravity: null } });
+		const restored = session({ id: 's1', agent: 'antigravity', agentSessionUuid: null });
+		let persisted: string | null = null;
+
+		await expect(
+			resolveSessionLaunch(host, 'demo', restored, true, async (uuid) => {
+				persisted = uuid;
+			})
+		).resolves.toEqual({
+			uuid: null,
+			resume: false
 		});
 		expect(persisted).toBeNull();
 	});

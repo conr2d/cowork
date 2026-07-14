@@ -6,6 +6,8 @@
 //! stays Tauri-free.
 
 use std::io::{Read, Write};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use cowork_errors::{Envelope, Stage};
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
@@ -16,13 +18,16 @@ use super::command::{PtyCommand, pty_bridge_failed_envelope, pty_spawn_failed_en
 /// once-takeable output reader, and the child handle (for kill). Stored behind
 /// a `Mutex` in the Tauri command layer.
 pub struct WindowsPtySession {
-    master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
+    master: Option<Box<dyn MasterPty + Send>>,
+    writer: Option<Box<dyn Write + Send>>,
     reader: Option<Box<dyn Read + Send>>,
     child: Box<dyn Child + Send + Sync>,
 }
 
 impl WindowsPtySession {
+    const EXIT_GRACE: Duration = Duration::from_secs(2);
+    const EXIT_POLL: Duration = Duration::from_millis(50);
+
     /// Open a ConPTY of `rows` x `cols` and spawn `cmd` into it. `stage` tags any
     /// emitted envelope (the terminal runs during auth and at done).
     pub fn spawn(cmd: &PtyCommand, rows: u16, cols: u16, stage: Stage) -> Result<Self, Envelope> {
@@ -57,8 +62,8 @@ impl WindowsPtySession {
             .map_err(|e| pty_bridge_failed_envelope(stage, &e.to_string()))?;
 
         Ok(Self {
-            master: pair.master,
-            writer,
+            master: Some(pair.master),
+            writer: Some(writer),
             reader: Some(reader),
             child,
         })
@@ -71,15 +76,21 @@ impl WindowsPtySession {
 
     /// Write user input (bytes from xterm `onData`) to the PTY.
     pub fn write_input(&mut self, data: &[u8], stage: Stage) -> Result<(), Envelope> {
-        self.writer
+        let writer = self
+            .writer
+            .as_mut()
+            .ok_or_else(|| pty_bridge_failed_envelope(stage, "pty writer unavailable"))?;
+        writer
             .write_all(data)
-            .and_then(|()| self.writer.flush())
+            .and_then(|()| writer.flush())
             .map_err(|e| pty_bridge_failed_envelope(stage, &e.to_string()))
     }
 
     /// Resize the ConPTY (xterm `onResize`).
     pub fn resize(&self, rows: u16, cols: u16, stage: Stage) -> Result<(), Envelope> {
         self.master
+            .as_ref()
+            .ok_or_else(|| pty_bridge_failed_envelope(stage, "pty master unavailable"))?
             .resize(PtySize {
                 rows,
                 cols,
@@ -89,8 +100,23 @@ impl WindowsPtySession {
             .map_err(|e| pty_bridge_failed_envelope(stage, &e.to_string()))
     }
 
-    /// Kill the child (window closed / session ended).
+    /// Close the PTY first so the shell sees HUP/EOF, then force-kill after a
+    /// short bounded grace period if the child still has not exited.
     pub fn kill(&mut self, stage: Stage) -> Result<(), Envelope> {
+        self.reader.take();
+        self.writer.take();
+        self.master.take();
+
+        let deadline = Instant::now() + Self::EXIT_GRACE;
+        loop {
+            match self.child.try_wait() {
+                Ok(Some(_)) => return Ok(()),
+                Ok(None) if Instant::now() < deadline => thread::sleep(Self::EXIT_POLL),
+                Ok(None) => break,
+                Err(e) => return Err(pty_bridge_failed_envelope(stage, &e.to_string())),
+            }
+        }
+
         self.child
             .kill()
             .map_err(|e| pty_bridge_failed_envelope(stage, &e.to_string()))

@@ -84,17 +84,34 @@ export interface SessionLaunchPlan {
 
 export async function resolveSessionLaunch(
 	host: HostClient,
+	workspaceSlug: string,
 	session: SessionDto,
 	restore: boolean,
-	persistClaudeUuid: (uuid: string) => Promise<void>
+	persistSessionUuid: (uuid: string) => Promise<void>
 ): Promise<SessionLaunchPlan> {
 	const launchUuid = session.agentSessionUuid ?? null;
+	if (session.agent === 'antigravity') {
+		if (launchUuid !== null) {
+			return { uuid: launchUuid, resume: restore };
+		}
+		if (!restore) return { uuid: null, resume: false };
+		try {
+			const capturedUuid = await host.captureSessionUuid(session.agent, workspaceSlug, 0);
+			if (capturedUuid !== null) {
+				await persistSessionUuid(capturedUuid);
+				return { uuid: capturedUuid, resume: true };
+			}
+		} catch {
+			// Best-effort: a failed probe must not block a working launch.
+		}
+		return { uuid: null, resume: false };
+	}
 	if (session.agent !== 'claude') {
 		return { uuid: launchUuid, resume: restore && launchUuid !== null };
 	}
 	if (launchUuid === null) {
 		const mintedUuid = crypto.randomUUID();
-		await persistClaudeUuid(mintedUuid);
+		await persistSessionUuid(mintedUuid);
 		return { uuid: mintedUuid, resume: false };
 	}
 	if (!restore) return { uuid: launchUuid, resume: false };
@@ -109,9 +126,9 @@ export async function resolveSessionLaunch(
 
 /**
  * The command autorun at PTY spawn for a session. Fresh claude sessions pin a
- * host-generated UUID (--session-id) so a later restore can resume; codex and
- * antigravity UUIDs are captured lazily after first activity, so a fresh spawn
- * is bare and only a restore resumes.
+ * host-generated UUID (--session-id) so a later restore can resume; codex UUIDs
+ * are captured lazily after first activity; and a restored agy session with no
+ * stored UUID heals itself from agy's cwd index before falling back to bare.
  */
 export function sessionLaunch(agent: AgentId, uuid: string | null, resume: boolean): string {
 	if (uuid === null) return agentBinary(agent);

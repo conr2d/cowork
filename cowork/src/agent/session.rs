@@ -1,5 +1,5 @@
-//! Agent session UUID capture (v0.2 WP4d): scan durable agent session artifacts
-//! for the newest conversation tied to a workspace cwd and spawn time.
+//! Agent session UUID capture (v0.2 WP4d): inspect durable agent session
+//! artifacts for the conversation tied to a workspace cwd and spawn time.
 
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -91,43 +91,21 @@ fn rollout_first_line_json(path: &Path) -> Option<serde_json::Value> {
     serde_json::from_str::<serde_json::Value>(&line).ok()
 }
 
-/// Newest `conversations/*.db` under agy_root whose raw bytes contain cwd and
-/// mtime > since_ms. Returns the file stem (the conversation UUID).
+/// Agy's authoritative cwd → UUID index in `cache/last_conversations.json`.
+/// The index has no timestamp metadata, so `since_ms` is intentionally unused
+/// for agy: if the cwd key exists, its UUID wins.
 pub fn agy_session_uuid(agy_root: &Path, cwd: &str, since_ms: u64) -> Option<String> {
-    let conversations = agy_root.join("conversations");
-    let Ok(entries) = fs::read_dir(conversations) else {
-        return None;
-    };
-    let mut best: Option<(u64, String, String)> = None;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("db") {
-            continue;
-        }
-        let Some(mtime_ms) = modified_ms(&path) else {
-            continue;
-        };
-        if mtime_ms <= since_ms {
-            continue;
-        }
-        let Ok(bytes) = fs::read(&path) else {
-            continue;
-        };
-        if !contains_subslice(&bytes, cwd.as_bytes()) {
-            continue;
-        }
-        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
-        let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
-            continue;
-        };
-        let candidate = (mtime_ms, file_name.to_string(), stem.to_string());
-        if best.as_ref().is_none_or(|current| candidate > *current) {
-            best = Some(candidate);
-        }
-    }
-    best.map(|(_, _, uuid)| uuid)
+    let _ = since_ms;
+    agy_last_conversations(agy_root)?
+        .remove(cwd)?
+        .as_str()
+        .map(str::to_string)
+}
+
+fn agy_last_conversations(agy_root: &Path) -> Option<serde_json::Map<String, serde_json::Value>> {
+    let path = agy_root.join("cache/last_conversations.json");
+    let bytes = fs::read(path).ok()?;
+    serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&bytes).ok()
 }
 
 pub fn claude_session_exists(claude_root: &Path, uuid: &str) -> bool {
@@ -190,13 +168,6 @@ fn rollout_with_uuid_exists(dir: &Path, uuid: &str) -> bool {
         }
     }
     false
-}
-
-fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
-    needle.is_empty()
-        || haystack
-            .windows(needle.len())
-            .any(|window| window == needle)
 }
 
 fn modified_ms(path: &Path) -> Option<u64> {
@@ -429,16 +400,19 @@ mod tests {
         );
     }
 
+    fn write_agy_index(root: &Path, body: &str) {
+        let path = root.join("cache");
+        fs::create_dir_all(&path).expect("create agy cache dir");
+        fs::write(path.join("last_conversations.json"), body).expect("write agy index");
+    }
+
     #[test]
-    fn agy_db_matching_cwd_returns_stem() {
+    fn agy_index_matching_cwd_returns_uuid() {
         let home = TempHome::new("agy-match");
-        let conversations = home.path.join("conversations");
-        fs::create_dir_all(&conversations).expect("create conversations");
-        fs::write(
-            conversations.join("u1.db"),
-            b"prefix /home/u/workspaces/app suffix",
-        )
-        .expect("write db");
+        write_agy_index(
+            &home.path,
+            r#"{"/home/u/workspaces/app":"u1","/home/u/workspaces/other":"u2"}"#,
+        );
         assert_eq!(
             agy_session_uuid(&home.path, "/home/u/workspaces/app", 0).as_deref(),
             Some("u1")
@@ -446,19 +420,27 @@ mod tests {
     }
 
     #[test]
-    fn agy_skips_non_matching_sidecars_and_missing_dir() {
-        let home = TempHome::new("agy-skip");
-        let conversations = home.path.join("conversations");
-        fs::create_dir_all(&conversations).expect("create conversations");
-        fs::write(conversations.join("nope.db"), b"other cwd").expect("write db");
-        fs::write(conversations.join("u1.db-shm"), b"/home/u/workspaces/app")
-            .expect("write sidecar");
-        fs::write(conversations.join("u1.db-wal"), b"/home/u/workspaces/app")
-            .expect("write sidecar");
+    fn agy_index_missing_cwd_returns_none() {
+        let home = TempHome::new("agy-miss");
+        write_agy_index(&home.path, r#"{"/home/u/workspaces/other":"u2"}"#);
         assert_eq!(
             agy_session_uuid(&home.path, "/home/u/workspaces/app", 0),
             None
         );
+    }
+
+    #[test]
+    fn agy_index_malformed_returns_none() {
+        let home = TempHome::new("agy-malformed");
+        write_agy_index(&home.path, r#"["not","an","object"]"#);
+        assert_eq!(
+            agy_session_uuid(&home.path, "/home/u/workspaces/app", 0),
+            None
+        );
+    }
+
+    #[test]
+    fn agy_index_missing_file_returns_none() {
         let missing = TempHome::new("agy-missing");
         assert_eq!(
             agy_session_uuid(&missing.path, "/home/u/workspaces/app", 0),

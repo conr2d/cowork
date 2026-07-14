@@ -118,17 +118,23 @@ export function createSessionManager(
 		try {
 			let session = workspace.sessions.find((item) => item.id === sessionId);
 			const launchPlan = session
-				? await resolveSessionLaunch(host, session, !fresh.has(sessionId), async (uuid) => {
-						const current = resolveSession(workspace.slug, sessionId);
-						if (!current.workspace || !current.session) return;
-						await shell.updateSessions(
-							current.workspace.slug,
-							current.workspace.sessions.map((item) =>
-								item.id === sessionId ? { ...item, agentSessionUuid: uuid } : item
-							)
-						);
-						session = resolveSession(workspace.slug, sessionId).session ?? session;
-					})
+				? await resolveSessionLaunch(
+						host,
+						workspace.slug,
+						session,
+						!fresh.has(sessionId),
+						async (uuid) => {
+							const current = resolveSession(workspace.slug, sessionId);
+							if (!current.workspace || !current.session) return;
+							await shell.updateSessions(
+								current.workspace.slug,
+								current.workspace.sessions.map((item) =>
+									item.id === sessionId ? { ...item, agentSessionUuid: uuid } : item
+								)
+							);
+							session = resolveSession(workspace.slug, sessionId).session ?? session;
+						}
+					)
 				: { uuid: null, resume: false };
 			launchPlans.set(sessionId, launchPlan);
 			if (session?.agent === 'antigravity') {
@@ -193,7 +199,14 @@ export function createSessionManager(
 			return activeBySlug[slug] ?? null;
 		},
 		launchPlan(sessionId, fallbackUuid) {
-			return launchPlans.get(sessionId) ?? { uuid: fallbackUuid, resume: false };
+			// `activate` sets the plan before pushing to `open`, so a render should
+			// always find one. If it somehow does not, resume rather than guess a new
+			// session: with a stored uuid, `resume: false` makes codex and agy silently
+			// open a NEW conversation (they only pass the uuid when resuming) and makes
+			// claude spawn `--session-id`, which is fatal when the conversation exists.
+			// Resuming a conversation that is not there merely prints the agent's own
+			// error. Fail loudly, never lose history quietly.
+			return launchPlans.get(sessionId) ?? { uuid: fallbackUuid, resume: fallbackUuid !== null };
 		},
 		async ensureActive(workspace) {
 			if (workspace.sessions.length === 0) {

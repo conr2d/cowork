@@ -171,11 +171,17 @@ pub fn pty_kill(state: State<'_, PtyState>, id: String) -> Result<(), Envelope> 
 /// Kill every live session (window destroyed). Errors are ignored: the children
 /// are being torn down with the app and there is no surface left to report to.
 pub fn kill_all(state: &PtyState) {
+    let mut joins = Vec::new();
     for session in state.drain() {
-        let _ = session
-            .lock()
-            .expect("PtyRegistry session mutex poisoned")
-            .kill(STAGE);
+        joins.push(std::thread::spawn(move || {
+            let _ = session
+                .lock()
+                .expect("PtyRegistry session mutex poisoned")
+                .kill(STAGE);
+        }));
+    }
+    for join in joins {
+        let _ = join.join();
     }
 }
 

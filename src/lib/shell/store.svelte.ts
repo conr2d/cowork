@@ -12,6 +12,7 @@ export interface Shell {
 	readonly recent: readonly WorkspaceDto[];
 	readonly loading: boolean;
 	readonly error: Envelope | null;
+	reportError(error: Envelope): void;
 	load(): Promise<void>;
 	select(slug: string): Promise<void>;
 	create(name: string, agent: AgentId, preset: string): Promise<void>;
@@ -74,6 +75,9 @@ export function createShell(host: HostClient): Shell {
 		},
 		get error() {
 			return error;
+		},
+		reportError(nextError) {
+			error = nextError;
 		},
 		async load() {
 			loading = true;

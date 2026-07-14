@@ -19,7 +19,7 @@ PowerShell Direct through Invoke-Command -VMName, and file copy uses Copy-VMFile
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
-    [ValidateSet('create-vm', 'baseline-checkpoint', 'prepare', 'revert', 'induce', 'verify-guest', 'status')]
+    [ValidateSet('create-vm', 'baseline-checkpoint', 'prepare', 'copy-installer', 'revert', 'induce', 'verify-guest', 'status')]
     [string]$Action,
 
     [string]$VmName = 'Cowork-FullGate',
@@ -65,6 +65,34 @@ function Assert-VmExists {
     if (-not (Get-VM -Name $VmName -ErrorAction SilentlyContinue)) {
         throw "VM '$VmName' does not exist."
     }
+}
+
+# Copy the installer into the running guest. Copy-VMFile needs the Guest Service
+# Interface, which Hyper-V leaves OFF by default, so enable it rather than
+# failing with a message nobody can act on.
+function Copy-Installer {
+    if (-not $CoworkSetup) {
+        throw "-CoworkSetup is required."
+    }
+
+    if (-not (Test-Path $CoworkSetup)) {
+        throw "Cowork installer does not exist: $CoworkSetup"
+    }
+
+    if ((Get-VM -Name $VmName).State -ne 'Running') {
+        throw "VM '$VmName' must be running to receive a file. Start-VM -Name $VmName"
+    }
+
+    $svc = Get-VMIntegrationService -VMName $VmName -Name 'Guest Service Interface'
+    if (-not $svc.Enabled) {
+        Enable-VMIntegrationService -VMName $VmName -Name 'Guest Service Interface'
+        Write-Host "Enabled the Guest Service Interface (it is off by default)."
+    }
+
+    $destination = Join-Path $GuestDest (Split-Path $CoworkSetup -Leaf)
+    Copy-VMFile -VMName $VmName -SourcePath $CoworkSetup -DestinationPath $destination -FileSource Host -CreateFullPath -Force
+    Write-Host "Installer copied to $destination."
+    return $destination
 }
 
 switch ($Action) {
@@ -119,20 +147,18 @@ switch ($Action) {
 
     'prepare' {
         Assert-VmExists
-
-        if (-not $CoworkSetup) {
-            throw "-CoworkSetup is required for prepare."
-        }
-
-        if (-not (Test-Path $CoworkSetup)) {
-            throw "Cowork installer does not exist: $CoworkSetup"
-        }
-
-        $destination = Join-Path $GuestDest (Split-Path $CoworkSetup -Leaf)
-        Copy-VMFile -VMName $VmName -SourcePath $CoworkSetup -DestinationPath $destination -FileSource Host -CreateFullPath -Force
-        Write-Host "Installer copied to $destination."
+        Copy-Installer | Out-Null
         Write-Host "Sign the guest browser OUT of the agent accounts before running the GUI wizard." -ForegroundColor Yellow
         Checkpoint-VM -Name $VmName -SnapshotName $Snapshot
+    }
+
+    # Drop a fresh installer into a guest that is already set up, WITHOUT touching
+    # checkpoints. This is the loop you want while a gate run is in flight and a
+    # new artifact lands: the installer overwrites the previous one in place.
+    'copy-installer' {
+        Assert-VmExists
+        $destination = Copy-Installer
+        Write-Host "Run it in the guest: $destination" -ForegroundColor Cyan
     }
 
     'revert' {

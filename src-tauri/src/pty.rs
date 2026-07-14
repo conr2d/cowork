@@ -34,6 +34,10 @@ const READ_CHUNK: usize = 4096;
 /// of the same spawn step, so retries replay the launch command without a
 /// frontend-side race. Each `onData` message is base64 of one raw PTY output
 /// chunk; the frontend base64-decodes to bytes and writes them to xterm.
+// A Tauri command's parameter list IS the IPC payload; grouping these into a
+// struct would only hide the same fields behind an indirection the frontend
+// would still have to spell out.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub fn pty_spawn(
     state: State<'_, PtyState>,

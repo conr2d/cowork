@@ -39,6 +39,11 @@ export type WslEnableDto = 'Ready' | 'RebootRequired';
 /** `provision_run` success result. */
 export type ProvisionDto = 'Ready' | 'AlreadyExists';
 
+export interface AppBuildDto {
+	version: string;
+	sha: string;
+}
+
 /** Persisted reboot-resume state. */
 export interface ResumeDto {
 	stage: 'WslReady';

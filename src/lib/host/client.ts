@@ -6,6 +6,7 @@
 import type { AgentId } from '$lib/terminal/agent';
 import type { Envelope } from '$lib/errors/registry';
 import type {
+	AppBuildDto,
 	PreflightReport,
 	ProgressEvent,
 	ProvisionDto,
@@ -17,6 +18,7 @@ import type {
 
 /** The setup operations the wizard performs. Methods reject with an `Envelope`. */
 export interface HostClient {
+	appBuild(): Promise<AppBuildDto>;
 	preflightRun(): Promise<PreflightReport>;
 	wslEnable(selectedAgents: AgentId[]): Promise<WslEnableDto>;
 	provisionRun(): Promise<ProvisionDto>;
@@ -47,6 +49,10 @@ export function asEnvelope(error: unknown): Envelope {
 
 /** The production client, backed by the Tauri command bridge. */
 export const tauriHost: HostClient = {
+	async appBuild() {
+		const { invoke } = await import('@tauri-apps/api/core');
+		return invoke<AppBuildDto>('app_build');
+	},
 	async preflightRun() {
 		const { invoke } = await import('@tauri-apps/api/core');
 		return invoke<PreflightReport>('preflight_run');

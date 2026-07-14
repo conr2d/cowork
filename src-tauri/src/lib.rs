@@ -11,6 +11,7 @@
 //! stays host-agnostic (enforced by the host/guest-separation conformance gate)
 //! so a future Mac/Linux host is "write a new host driver", not a rewrite.
 
+mod build_info;
 mod pty;
 mod session;
 mod setup;
@@ -38,6 +39,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            build_info::app_build,
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,

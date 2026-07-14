@@ -3,7 +3,9 @@
 
 	import Terminal from '$lib/components/Terminal.svelte';
 	import type { Envelope } from '$lib/errors/registry';
+	import { formatAppBuild, loadAppBuild } from '$lib/host/build';
 	import { tauriHost } from '$lib/host/client';
+	import type { AppBuildDto } from '$lib/host/types';
 	import type { WorkspaceDto } from '$lib/host/types';
 	import * as m from '$lib/paraglide/messages';
 	import { getLocale } from '$lib/paraglide/runtime';
@@ -19,6 +21,7 @@
 	const shell = createShell(tauriHost);
 
 	let theme = $state(loadTheme());
+	let build = $state<AppBuildDto | null>(null);
 	const manager = createSessionManager(shell, tauriHost, () => theme);
 	let collapsed = $state(loadCollapsed());
 	let newWorkspaceOpen = $state(false);
@@ -51,6 +54,7 @@
 
 	onMount(() => {
 		void (async () => {
+			build = await loadAppBuild(tauriHost);
 			// Sync before anything probes the guest: a rebuilt app or a missing/corrupt
 			// installed binary must re-inject the shipped bytes into the distro.
 			// Best-effort: a failed sync still boots; guest calls surface real errors.
@@ -58,6 +62,8 @@
 			await shell.load();
 		})();
 	});
+
+	const buildLabel = $derived(build ? formatAppBuild(build) : null);
 
 	function toggleTheme(): void {
 		theme = theme === 'dark' ? 'light' : 'dark';
@@ -105,6 +111,7 @@
 <div class="shell" class:collapsed class:dark={theme === 'dark'}>
 	<Sidebar
 		{shell}
+		{buildLabel}
 		{collapsed}
 		{theme}
 		{renamingSlug}

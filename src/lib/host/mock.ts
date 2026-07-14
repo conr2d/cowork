@@ -5,6 +5,7 @@
 import type { AgentId } from '$lib/terminal/agent';
 import type { HostClient } from './client';
 import type {
+	AppBuildDto,
 	PreflightReport,
 	ProgressEvent,
 	ProvisionDto,
@@ -15,6 +16,7 @@ import type {
 } from './types';
 
 export interface MockHostOptions {
+	build?: AppBuildDto;
 	preflight?: PreflightReport;
 	wslEnable?: WslEnableDto;
 	provision?: ProvisionDto;
@@ -114,6 +116,7 @@ export function createMockHost(options: MockHostOptions = {}): HostClient {
 	};
 
 	return {
+		appBuild: () => rejectIf('appBuild', options.build ?? { version: '0.1.0', sha: 'abcdef0' }),
 		preflightRun: () => rejectIf('preflightRun', options.preflight ?? PASS_REPORT),
 		wslEnable: () => rejectIf('wslEnable', options.wslEnable ?? 'Ready'),
 		provisionRun: () => rejectIf('provisionRun', options.provision ?? 'Ready'),

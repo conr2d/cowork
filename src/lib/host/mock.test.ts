@@ -11,6 +11,11 @@ describe('createMockHost', () => {
 		expect(report.outcomes).toHaveLength(9);
 	});
 
+	it('returns a fixed app build stamp by default', async () => {
+		const host = createMockHost();
+		await expect(host.appBuild()).resolves.toEqual({ version: '0.1.0', sha: 'abcdef0' });
+	});
+
 	it('streams the default bootstrap steps to onProgress', async () => {
 		const host = createMockHost();
 		const seen: ProgressEvent[] = [];

@@ -1,4 +1,10 @@
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+const FALLBACK_SHA_LEN: usize = 7;
+
 fn main() {
+    emit_build_sha();
     tauri_build::build();
 
     // With the `embed-guest` feature, stage the cross-compiled guest binary
@@ -15,5 +21,73 @@ fn main() {
         std::fs::copy(&src, &dest)
             .unwrap_or_else(|e| panic!("copy guest binary {src} -> {}: {e}", dest.display()));
         println!("cargo:rerun-if-changed={src}");
+    }
+}
+
+fn emit_build_sha() {
+    println!("cargo:rerun-if-env-changed=GITHUB_SHA");
+
+    let sha = git_checkout_sha()
+        .or_else(github_sha)
+        .unwrap_or_else(|| "unknown".to_string());
+    println!("cargo:rustc-env=COWORK_BUILD_SHA={sha}");
+}
+
+fn git_checkout_sha() -> Option<String> {
+    let cwd = std::env::current_dir().ok()?;
+    let git_dir = git_dir(&cwd)?;
+    emit_git_rerun_hints(&git_dir);
+    git_output(&cwd, &["rev-parse", "--short", "HEAD"])
+}
+
+fn github_sha() -> Option<String> {
+    std::env::var("GITHUB_SHA")
+        .ok()
+        .map(|sha| {
+            let sha = sha.trim();
+            sha.chars().take(FALLBACK_SHA_LEN).collect()
+        })
+        .filter(|sha: &String| !sha.is_empty())
+}
+
+fn git_dir(cwd: &Path) -> Option<PathBuf> {
+    git_output(cwd, &["rev-parse", "--git-dir"]).map(|path| cwd.join(path))
+}
+
+fn emit_git_rerun_hints(git_dir: &Path) {
+    println!("cargo:rerun-if-changed={}", git_dir.join("HEAD").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        git_dir.join("packed-refs").display()
+    );
+
+    if let Ok(head) = std::fs::read_to_string(git_dir.join("HEAD")) {
+        if let Some(reference) = head.strip_prefix("ref:") {
+            let reference = reference.trim();
+            if !reference.is_empty() {
+                println!(
+                    "cargo:rerun-if-changed={}",
+                    git_dir.join(reference).display()
+                );
+            }
+        }
+    }
+}
+
+fn git_output(cwd: &Path, args: &[&str]) -> Option<String> {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8(output.stdout).ok()?;
+    let value = value.trim();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
     }
 }

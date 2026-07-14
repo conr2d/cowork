@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { SessionDto, WorkspaceDto } from '$lib/host/types';
+import { createMockHost } from '$lib/host/mock';
 import {
 	agentBinary,
 	brand,
@@ -9,6 +10,7 @@ import {
 	nextSessionTitle,
 	pinnedOf,
 	pruneOpen,
+	resolveSessionLaunch,
 	recentOf,
 	sessionLaunch,
 	sortedSessions
@@ -31,7 +33,7 @@ function workspace(
 }
 
 function session(partial: Partial<SessionDto> & Pick<SessionDto, 'id'>): SessionDto {
-	return { agent: 'claude', agentSessionUuid: null, title: 't', order: 0, ...partial };
+	return { agent: 'claude', agentSessionUuid: undefined, title: 't', order: 0, ...partial };
 }
 
 describe('brand', () => {
@@ -164,6 +166,121 @@ describe('sessionLaunch', () => {
 
 	it('launches fresh antigravity sessions bare when no uuid exists', () => {
 		expect(sessionLaunch('antigravity', null, false)).toBe('agy');
+	});
+});
+
+describe('resolveSessionLaunch', () => {
+	it('resumes a restored claude session when the conversation exists', async () => {
+		const host = createMockHost({ sessionChecks: { claude: true } });
+		const restored = session({
+			id: 's1',
+			agentSessionUuid: '550e8400-e29b-41d4-a716-446655440000'
+		});
+		let persisted: string | null = null;
+
+		await expect(
+			resolveSessionLaunch(host, 'demo', restored, true, async (uuid) => {
+				persisted = uuid;
+			})
+		).resolves.toEqual({
+			uuid: '550e8400-e29b-41d4-a716-446655440000',
+			resume: true
+		});
+		expect(persisted).toBeNull();
+	});
+
+	it('re-pins a restored claude session id when the conversation is missing', async () => {
+		const host = createMockHost({ sessionChecks: { claude: false } });
+		const restored = session({
+			id: 's1',
+			agentSessionUuid: '550e8400-e29b-41d4-a716-446655440000'
+		});
+		let persisted: string | null = null;
+
+		await expect(
+			resolveSessionLaunch(host, 'demo', restored, true, async (uuid) => {
+				persisted = uuid;
+			})
+		).resolves.toEqual({
+			uuid: '550e8400-e29b-41d4-a716-446655440000',
+			resume: false
+		});
+		expect(persisted).toBeNull();
+	});
+
+	it('mints and persists a claude session id when the stored uuid is absent', async () => {
+		const host = createMockHost();
+		const broken = session({ id: 's1' });
+		let persisted: string | null = null;
+		const randomUuid = vi
+			.spyOn(globalThis.crypto, 'randomUUID')
+			.mockReturnValue('550e8400-e29b-41d4-a716-446655440001');
+
+		try {
+			await expect(
+				resolveSessionLaunch(host, 'demo', broken, true, async (uuid) => {
+					persisted = uuid;
+				})
+			).resolves.toEqual({
+				uuid: '550e8400-e29b-41d4-a716-446655440001',
+				resume: false
+			});
+			expect(persisted).toBe('550e8400-e29b-41d4-a716-446655440001');
+		} finally {
+			randomUuid.mockRestore();
+		}
+	});
+
+	it('falls back to the stored claude uuid when the probe fails', async () => {
+		const envelope = { code: 'session.uuid_capture_failed', kind: 'Internal', stage: 'workspace' };
+		const host = createMockHost({ failWith: { sessionCheck: envelope } });
+		const restored = session({
+			id: 's1',
+			agentSessionUuid: '550e8400-e29b-41d4-a716-446655440000'
+		});
+		let persisted: string | null = null;
+
+		await expect(
+			resolveSessionLaunch(host, 'demo', restored, true, async (uuid) => {
+				persisted = uuid;
+			})
+		).resolves.toEqual({
+			uuid: '550e8400-e29b-41d4-a716-446655440000',
+			resume: true
+		});
+		expect(persisted).toBeNull();
+	});
+
+	it('heals a restored antigravity session from agy index when the stored uuid is absent', async () => {
+		const host = createMockHost({ sessionUuids: { antigravity: 'u1' } });
+		const restored = session({ id: 's1', agent: 'antigravity', agentSessionUuid: null });
+		let persisted: string | null = null;
+
+		await expect(
+			resolveSessionLaunch(host, 'demo', restored, true, async (uuid) => {
+				persisted = uuid;
+			})
+		).resolves.toEqual({
+			uuid: 'u1',
+			resume: true
+		});
+		expect(persisted).toBe('u1');
+	});
+
+	it('falls back to a bare restored antigravity launch when the index has no uuid', async () => {
+		const host = createMockHost({ sessionUuids: { antigravity: null } });
+		const restored = session({ id: 's1', agent: 'antigravity', agentSessionUuid: null });
+		let persisted: string | null = null;
+
+		await expect(
+			resolveSessionLaunch(host, 'demo', restored, true, async (uuid) => {
+				persisted = uuid;
+			})
+		).resolves.toEqual({
+			uuid: null,
+			resume: false
+		});
+		expect(persisted).toBeNull();
 	});
 });
 

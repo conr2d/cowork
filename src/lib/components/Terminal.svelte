@@ -4,9 +4,17 @@
 	import type { Terminal as XTerm } from '@xterm/xterm';
 	import '@xterm/xterm/css/xterm.css';
 
+	import type { Envelope, Kind } from '$lib/errors/registry';
+	import { asEnvelope } from '$lib/host/client';
 	import * as m from '$lib/paraglide/messages';
 	import { base64ToBytes } from '$lib/terminal/decode';
 	import { createUrlScanner } from '$lib/terminal/links';
+	import {
+		clampViewport,
+		hasSelection,
+		resolveTerminalShortcut,
+		shouldActivateLink
+	} from '$lib/terminal/ui';
 
 	const XTERM_LIGHT = {
 		background: '#faf8f5',
@@ -28,25 +36,25 @@
 	}
 
 	let {
+		sessionId = crypto.randomUUID(),
 		distro = 'Cowork',
 		workspace = '~',
 		locale = 'en',
 		detectLinks = false,
-		loginAttempts = 0,
 		theme = undefined,
 		autorun = undefined,
 		onspawn = undefined,
 		active = false,
 		onactivity = undefined
 	}: {
+		sessionId?: string;
 		distro?: string;
 		workspace?: string;
 		locale?: string;
 		detectLinks?: boolean;
-		loginAttempts?: number;
 		theme?: 'light' | 'dark';
 		autorun?: string;
-		onspawn?: (id: number) => void;
+		onspawn?: () => void;
 		active?: boolean;
 		onactivity?: (event: 'output' | 'exit') => void;
 	} = $props();
@@ -55,134 +63,459 @@
 	let cleanup: (() => void) | undefined;
 	let detectedUrl = $state<string | null>(null);
 	let termRef = $state<XTerm | undefined>(undefined);
-	let openUrl: ((url: string) => Promise<void>) | undefined;
+	let openUrl = $state<((url: string) => Promise<void>) | undefined>(undefined);
+	let initFailure = $state<{ envelope: Envelope } | { message: string } | null>(null);
+	let initNotice = $state<string | null>(null);
+	let retrySpawn = $state<(() => void) | null>(null);
+	let spawning = $state(false);
+
+	const SPAWN_TIMEOUT_MS = 10_000;
+
+	function clearDetectedUrl() {
+		detectedUrl = null;
+	}
+
+	function refocusTerminal() {
+		termRef?.focus();
+	}
+
+	function dismissDetectedUrl() {
+		clearDetectedUrl();
+		refocusTerminal();
+	}
+
+	function openDetectedUrl() {
+		if (detectedUrl && openUrl) void openUrl(detectedUrl);
+		refocusTerminal();
+	}
+
+	function bodyFor(kind: Kind): string {
+		switch (kind) {
+			case 'Blocker':
+				return m.error_blocker_body();
+			case 'NeedsUserAction':
+				return m.error_needs_action_body();
+			case 'Transient':
+				return m.error_transient_body();
+			case 'Internal':
+				return m.error_internal_body();
+			case 'Cancelled':
+				return m.error_cancelled_body();
+		}
+	}
+
+	function messageFrom(error: unknown): string {
+		if (error instanceof Error && error.message.trim()) return error.message;
+		if (typeof error === 'string' && error.trim()) return error;
+		if (typeof error === 'object' && error !== null) {
+			const maybeMessage = (error as { message?: unknown }).message;
+			if (typeof maybeMessage === 'string' && maybeMessage.trim()) return maybeMessage;
+		}
+		return 'Unknown error';
+	}
+
+	function isEnvelope(error: unknown): error is Envelope {
+		if (typeof error !== 'object' || error === null) return false;
+		const maybe = error as Partial<Envelope>;
+		return (
+			typeof maybe.code === 'string' &&
+			typeof maybe.kind === 'string' &&
+			typeof maybe.stage === 'string'
+		);
+	}
+
+	function captureFailure(error: unknown): void {
+		initFailure = isEnvelope(error)
+			? { envelope: asEnvelope(error) }
+			: { message: messageFrom(error) };
+	}
+
+	function clearFailure(): void {
+		initFailure = null;
+		retrySpawn = null;
+	}
+
+	function timeoutMessage(action: string): Error {
+		return new Error(`${action} timed out after ${SPAWN_TIMEOUT_MS / 1000} seconds.`);
+	}
+
+	function withTimeout<T>(task: Promise<T>, action: string): Promise<T> {
+		return new Promise<T>((resolve, reject) => {
+			const timeout = window.setTimeout(() => reject(timeoutMessage(action)), SPAWN_TIMEOUT_MS);
+			void task.then(
+				(value) => {
+					clearTimeout(timeout);
+					resolve(value);
+				},
+				(error) => {
+					clearTimeout(timeout);
+					reject(error);
+				}
+			);
+		});
+	}
+
+	// Attribute a failing chunk load to its module. The specifier must stay a
+	// STRING LITERAL inside import() — Vite only code-splits imports it can analyze
+	// statically, and a variable specifier silently drops the chunk from the bundle
+	// (it survives the dev server, then 404s in the packaged app).
+	async function loadModule<T>(name: string, load: () => Promise<T>): Promise<T> {
+		try {
+			return await load();
+		} catch (error) {
+			throw new Error(`Failed to load ${name}: ${messageFrom(error)}`);
+		}
+	}
 
 	async function loadCanvasFallback(term: XTerm): Promise<void> {
-		const { CanvasAddon } = await import('@xterm/addon-canvas');
+		const { CanvasAddon } = await loadModule(
+			'@xterm/addon-canvas',
+			() => import('@xterm/addon-canvas')
+		);
 		term.loadAddon(new CanvasAddon());
 	}
 
-	onMount(() => {
-		// Init runs in an async IIFE; onMount itself must return the (sync) cleanup.
-		void (async () => {
-			if (!container) return;
+	function currentSelection(term: XTerm): string {
+		return term.getSelection();
+	}
 
-			// Dynamic imports: xterm touches `document`, so it must never load during
-			// SSR/prerender — only here, client-side, after mount.
-			const { Terminal } = await import('@xterm/xterm');
-			const { FitAddon } = await import('@xterm/addon-fit');
-			const { Unicode11Addon } = await import('@xterm/addon-unicode11');
-			const { ClipboardAddon } = await import('@xterm/addon-clipboard');
-			const { WebglAddon } = await import('@xterm/addon-webgl');
-			const { invoke, Channel } = await import('@tauri-apps/api/core');
-			const { WebLinksAddon } = await import('@xterm/addon-web-links');
-			const opener = await import('@tauri-apps/plugin-opener');
-			openUrl = opener.openUrl;
+	function currentViewport(term: XTerm) {
+		return clampViewport(term.rows, term.cols);
+	}
 
-			const term = new Terminal({
-				cursorBlink: true,
-				fontFamily: theme
-					? "'IBM Plex Mono', Cascadia Code, Consolas, monospace"
-					: 'Cascadia Code, Consolas, monospace',
-				fontSize: 14,
-				allowProposedApi: true,
-				windowsPty: { backend: 'conpty' },
-				theme: theme ? palette(theme) : undefined
-			});
-			termRef = term;
+	async function copySelection(term: XTerm): Promise<void> {
+		const selection = currentSelection(term);
+		if (!hasSelection(selection)) return;
+		await navigator.clipboard.writeText(selection);
+	}
 
-			const fit = new FitAddon();
-			term.loadAddon(fit);
-			term.loadAddon(new Unicode11Addon());
-			term.unicode.activeVersion = '11';
-			term.loadAddon(new ClipboardAddon());
-			// Make URLs (e.g. an agent's OAuth login link) clickable → open in the
-			// host Windows browser via the opener plugin. This is the reliable
-			// handoff: WSL-side xdg-open/$BROWSER is unreliable (wslu was archived),
-			// so the host opens the browser, not the guest.
-			term.loadAddon(
-				new WebLinksAddon((_event, uri) => {
-					void openUrl!(uri);
-				})
-			);
+	async function pasteClipboard(term: XTerm): Promise<void> {
+		term.paste(await navigator.clipboard.readText());
+	}
 
-			term.open(container);
+	async function waitForVisibleContainer(
+		node: HTMLDivElement,
+		isDisposed: () => boolean
+	): Promise<'visible' | 'disposed' | 'timed-out'> {
+		const isVisible = () => node.offsetWidth > 0 && node.offsetHeight > 0;
+		if (isVisible()) return 'visible';
 
-			// WebGL renderer with Canvas fallback (streaming-output performance).
-			try {
-				const webgl = new WebglAddon();
-				webgl.onContextLoss(() => {
-					webgl.dispose();
-					void loadCanvasFallback(term);
-				});
-				term.loadAddon(webgl);
-			} catch {
-				await loadCanvasFallback(term);
-			}
+		return await new Promise<'visible' | 'disposed' | 'timed-out'>((resolve) => {
+			let settled = false;
+			let frame = 0;
+			let timeout = 0;
 
-			// Fit BEFORE spawn so the ConPTY is the measured size from the first byte
-			// (a hardcoded default corrupts a full-screen TUI's first frame).
-			fit.fit();
+			const finish = (value: 'visible' | 'disposed' | 'timed-out') => {
+				if (settled) return;
+				settled = true;
+				observer.disconnect();
+				cancelAnimationFrame(frame);
+				clearTimeout(timeout);
+				resolve(value);
+			};
 
-			const scanner = createUrlScanner();
-			const decoder = new TextDecoder();
-			const channel = new Channel<string>();
-			channel.onmessage = (chunk) => {
-				if (chunk === '') {
-					// Host EOF sentinel: the PTY child exited.
-					onactivity?.('exit');
+			const tick = () => {
+				if (isDisposed()) {
+					finish('disposed');
 					return;
 				}
-				const bytes = base64ToBytes(chunk);
-				term.write(bytes);
-				onactivity?.('output');
-				// Only scan once a login has been triggered — otherwise the shell's
-				// startup banner (e.g. the Ubuntu MOTD URL) would surface the button
-				// before the user has started signing in.
-				if (detectLinks && loginAttempts > 0) {
-					const url = scanner.push(decoder.decode(bytes, { stream: true }));
-					if (url) detectedUrl = url;
+				if (isVisible()) {
+					finish('visible');
+					return;
 				}
+				frame = requestAnimationFrame(tick);
 			};
-
-			const sessionId = await invoke<number>('pty_spawn', {
-				onData: channel,
-				distro,
-				workspace,
-				locale,
-				rows: term.rows,
-				cols: term.cols
-			});
-			onspawn?.(sessionId);
-			term.focus();
-			if (autorun) {
-				await invoke('pty_write', { id: sessionId, data: `${autorun}\n` });
-			}
-
-			const dataSub = term.onData((data) => {
-				void invoke('pty_write', { id: sessionId, data });
-			});
 
 			const observer = new ResizeObserver(() => {
-				if (!container || container.offsetWidth === 0 || container.offsetHeight === 0) return;
-				fit.fit();
-				void invoke('pty_resize', { id: sessionId, rows: term.rows, cols: term.cols });
+				if (isDisposed()) {
+					finish('disposed');
+					return;
+				}
+				if (isVisible()) finish('visible');
 			});
-			observer.observe(container);
 
-			cleanup = () => {
-				dataSub.dispose();
-				observer.disconnect();
-				void invoke('pty_kill', { id: sessionId });
-				term.dispose();
-			};
+			observer.observe(node);
+			frame = requestAnimationFrame(tick);
+			timeout = window.setTimeout(() => finish('timed-out'), 10_000);
+		});
+	}
+
+	onMount(() => {
+		let disposed = false;
+		// Proof of life: any byte from the PTY means the spawn worked, regardless of
+		// whether its IPC response ever came back.
+		let sawOutput = false;
+		// Init runs in an async IIFE; onMount itself must return the (sync) cleanup.
+		void (async () => {
+			try {
+				if (!container) return;
+				clearDetectedUrl();
+				initFailure = null;
+				initNotice = null;
+
+				// Dynamic imports: xterm touches `document`, so it must never load during
+				// SSR/prerender — only here, client-side, after mount.
+				const { Terminal } = await loadModule('@xterm/xterm', () => import('@xterm/xterm'));
+				const { FitAddon } = await loadModule('@xterm/addon-fit', () => import('@xterm/addon-fit'));
+				const { Unicode11Addon } = await loadModule(
+					'@xterm/addon-unicode11',
+					() => import('@xterm/addon-unicode11')
+				);
+				const { invoke, Channel } = await loadModule(
+					'@tauri-apps/api/core',
+					() => import('@tauri-apps/api/core')
+				);
+				const { WebLinksAddon } = await loadModule(
+					'@xterm/addon-web-links',
+					() => import('@xterm/addon-web-links')
+				);
+				const { ClipboardAddon } = await loadModule(
+					'@xterm/addon-clipboard',
+					() => import('@xterm/addon-clipboard')
+				);
+
+				try {
+					const opener = await loadModule(
+						'@tauri-apps/plugin-opener',
+						() => import('@tauri-apps/plugin-opener')
+					);
+					openUrl = opener.openUrl;
+				} catch (error) {
+					openUrl = undefined;
+					initNotice = messageFrom(error);
+					console.error(error);
+				}
+
+				const term = new Terminal({
+					cursorBlink: true,
+					fontFamily: theme
+						? "'IBM Plex Mono', Cascadia Code, Consolas, monospace"
+						: 'Cascadia Code, Consolas, monospace',
+					fontSize: 14,
+					allowProposedApi: true,
+					windowsPty: { backend: 'conpty' },
+					theme: theme ? palette(theme) : undefined,
+					// OSC 8 hyperlinks (claude prints its sign-in link as one) never reach
+					// WebLinksAddon — that addon only scans plain text. They go through this
+					// option instead, and xterm's default for it is window.open, which the
+					// webview blocks ("Opening link blocked as opener could not be cleared").
+					// Route them to the host opener, like the plain-text links.
+					linkHandler: {
+						activate: (event, uri) => {
+							if (!shouldActivateLink(event?.button ?? 0, hasSelection(currentSelection(term)))) {
+								return;
+							}
+							void openUrl?.(uri);
+						}
+					}
+				});
+				termRef = term;
+
+				const fit = new FitAddon();
+				term.loadAddon(fit);
+				term.loadAddon(new ClipboardAddon());
+				term.loadAddon(new Unicode11Addon());
+				term.unicode.activeVersion = '11';
+				// xterm runs this for keydown, keypress AND keyup. Decide once, on keydown,
+				// and make the other two follow that decision — otherwise copying clears the
+				// selection, the keypress re-evaluates with nothing selected, falls through to
+				// the PTY, and Ctrl+C kills the agent anyway: the exact bug this fixes.
+				let swallowing = false;
+				term.attachCustomKeyEventHandler((event) => {
+					if (event.type !== 'keydown') {
+						if (!swallowing) return true;
+						if (event.type === 'keyup') swallowing = false;
+						return false;
+					}
+					if (swallowing && event.repeat) {
+						event.preventDefault();
+						return false;
+					}
+
+					const action = resolveTerminalShortcut(event, hasSelection(currentSelection(term)));
+					if (action === 'pass-through') {
+						swallowing = false;
+						return true;
+					}
+
+					swallowing = true;
+					event.preventDefault();
+					const run = action === 'copy-selection' ? copySelection(term) : pasteClipboard(term);
+					void run.catch((error) => {
+						initNotice = messageFrom(error);
+						console.error(error);
+					});
+					return false;
+				});
+				// Make URLs (e.g. an agent's OAuth login link) clickable → open in the
+				// host Windows browser via the opener plugin. This is the reliable
+				// handoff: WSL-side xdg-open/$BROWSER is unreliable (wslu was archived),
+				// so the host opens the browser, not the guest.
+				if (openUrl) {
+					term.loadAddon(
+						new WebLinksAddon((event, uri) => {
+							if (!shouldActivateLink(event?.button ?? 0, hasSelection(currentSelection(term)))) {
+								return;
+							}
+							const target = detectedUrl && detectedUrl.startsWith(uri) ? detectedUrl : uri;
+							void openUrl?.(target);
+						})
+					);
+				}
+
+				term.open(container);
+
+				const visibility = await waitForVisibleContainer(container, () => disposed);
+				if (visibility !== 'visible') {
+					retrySpawn = null;
+					if (visibility === 'timed-out') {
+						captureFailure(
+							new Error(
+								'Terminal host stayed hidden for 10 seconds and never reported a usable size.'
+							)
+						);
+					}
+					term.dispose();
+					return;
+				}
+
+				// WebGL renderer with Canvas fallback (streaming-output performance).
+				try {
+					const { WebglAddon } = await loadModule(
+						'@xterm/addon-webgl',
+						() => import('@xterm/addon-webgl')
+					);
+					const webgl = new WebglAddon();
+					webgl.onContextLoss(() => {
+						webgl.dispose();
+						void loadCanvasFallback(term).catch((error) => {
+							initNotice = `Failed to load @xterm/addon-webgl after context loss; ${messageFrom(error)}`;
+							console.error(error);
+						});
+					});
+					term.loadAddon(webgl);
+				} catch (error) {
+					initNotice = messageFrom(error);
+					console.error(error);
+					await loadCanvasFallback(term).catch((fallbackError) => {
+						initNotice = `${messageFrom(error)}; canvas fallback failed: ${messageFrom(fallbackError)}`;
+						console.error(fallbackError);
+					});
+				}
+
+				// Fit BEFORE spawn so the ConPTY is the measured size from the first byte
+				// (a hardcoded default corrupts a full-screen TUI's first frame).
+				fit.fit();
+
+				const scanner = createUrlScanner();
+				const decoder = new TextDecoder();
+				let activeChannel: { onmessage: ((chunk: string) => void) | null } | null = null;
+				const dataSub = term.onData((data) => {
+					void invoke('pty_write', { id: sessionId, data });
+				});
+
+				const observer = new ResizeObserver(() => {
+					if (!container || container.offsetWidth === 0 || container.offsetHeight === 0) return;
+					fit.fit();
+					const viewport = currentViewport(term);
+					void invoke('pty_resize', { id: sessionId, rows: viewport.rows, cols: viewport.cols });
+				});
+				observer.observe(container);
+
+				cleanup = () => {
+					if (activeChannel) {
+						activeChannel.onmessage = null;
+						activeChannel = null;
+					}
+					dataSub.dispose();
+					observer.disconnect();
+					void invoke('pty_kill', { id: sessionId });
+					term.dispose();
+				};
+				if (disposed) {
+					cleanup();
+					cleanup = undefined;
+					return;
+				}
+
+				const handleSpawnFailure = (error: unknown) => {
+					if (disposed) return;
+					// The whole point of the caller-owned id is that a LOST spawn response no
+					// longer breaks the terminal: the PTY is running and its output is already
+					// arriving on the channel. Covering a demonstrably live terminal with an
+					// error panel would reintroduce the bug from the other side. Output is the
+					// proof of life — if we have seen any, the spawn worked, whatever the
+					// response did.
+					if (sawOutput) {
+						console.error(error);
+						return;
+					}
+					captureFailure(error);
+					retrySpawn = () => {
+						void spawn().catch(handleSpawnFailure);
+					};
+				};
+
+				const spawn = async () => {
+					if (spawning) return;
+					spawning = true;
+					sawOutput = false;
+					clearFailure();
+					try {
+						if (activeChannel) activeChannel.onmessage = null;
+						const channel = new Channel<string>();
+						channel.onmessage = (chunk) => {
+							if (chunk === '') {
+								// Host EOF sentinel: the PTY child exited.
+								onactivity?.('exit');
+								return;
+							}
+							if (!sawOutput && initFailure) clearFailure();
+							sawOutput = true;
+							const bytes = base64ToBytes(chunk);
+							term.write(bytes);
+							onactivity?.('output');
+							// createUrlScanner only reports OAuth/device sign-in URLs (isLoginUrl),
+							// so an agent's own login prompt surfaces the button while the shell's
+							// MOTD and docs links never do.
+							if (detectLinks && openUrl) {
+								const url = scanner.push(decoder.decode(bytes, { stream: true }));
+								if (url) detectedUrl = url;
+							}
+						};
+						activeChannel = channel;
+						const viewport = currentViewport(term);
+						await withTimeout(
+							invoke('pty_spawn', {
+								id: sessionId,
+								onData: channel,
+								distro,
+								workspace,
+								locale,
+								rows: viewport.rows,
+								cols: viewport.cols,
+								autorun
+							}),
+							'Terminal startup'
+						);
+					} finally {
+						spawning = false;
+					}
+				};
+
+				void spawn().catch(handleSpawnFailure);
+
+				onspawn?.();
+				term.focus();
+			} catch (error) {
+				captureFailure(error);
+				console.error(error);
+			}
 		})();
-	});
 
-	// Focus the terminal each time a login is triggered, so the user can type /
-	// paste (e.g. an auth code) without having to click into the terminal first.
-	$effect(() => {
-		if (loginAttempts > 0) termRef?.focus();
+		return () => {
+			disposed = true;
+		};
 	});
 
 	// Focus when this terminal's tab becomes the active one.
@@ -203,23 +536,71 @@
 </script>
 
 <div class="terminal-wrap">
-	{#if detectLinks && detectedUrl}
-		<button
-			type="button"
-			class="flex items-center gap-2 self-start rounded bg-neutral-100 px-3 py-1.5 text-sm font-medium text-neutral-900 hover:bg-neutral-200"
-			onclick={() => {
-				if (detectedUrl && openUrl) void openUrl(detectedUrl);
-			}}
-		>
-			<span aria-hidden="true">🔗</span>
-			<span>{m.auth_open_login()}</span>
-		</button>
+	{#if initFailure}
+		<section class="terminal-error" class:is-dark={theme === 'dark'}>
+			<div class="terminal-error-copy">
+				<h2>{m.error_title()}</h2>
+				{#if 'envelope' in initFailure}
+					<p>{bodyFor(initFailure.envelope.kind)}</p>
+					<code>{initFailure.envelope.code}</code>
+					{#if initFailure.envelope.cause}
+						<div class="terminal-error-cause">
+							<span>{m.error_cause_label()}</span>
+							<pre>{initFailure.envelope.cause}</pre>
+						</div>
+					{/if}
+				{:else}
+					<p>{initFailure.message}</p>
+				{/if}
+				{#if retrySpawn}
+					<button
+						type="button"
+						class="terminal-error-retry"
+						onclick={retrySpawn}
+						disabled={spawning}
+					>
+						{spawning ? m.error_retrying() : m.error_retry()}
+					</button>
+				{/if}
+			</div>
+		</section>
+	{/if}
+	{#if initNotice}
+		<div class="terminal-notice" class:is-dark={theme === 'dark'}>
+			<strong>Terminal notice</strong>
+			<span>{initNotice}</span>
+			<button
+				type="button"
+				class="terminal-notice-dismiss"
+				aria-label={m.auth_dismiss()}
+				onclick={() => (initNotice = null)}
+			>
+				<span aria-hidden="true">✕</span>
+			</button>
+		</div>
+	{/if}
+	{#if detectLinks && detectedUrl && openUrl}
+		<div class="signin-toast" class:is-dark={theme === 'dark'}>
+			<button type="button" class="signin-open" onclick={openDetectedUrl}>
+				<span aria-hidden="true">🔗</span>
+				<span class="signin-label">{m.auth_open_login()}</span>
+			</button>
+			<button
+				type="button"
+				class="signin-dismiss"
+				aria-label={m.auth_dismiss()}
+				onclick={dismissDetectedUrl}
+			>
+				<span aria-hidden="true">✕</span>
+			</button>
+		</div>
 	{/if}
 	<div bind:this={container} class="terminal-host"></div>
 </div>
 
 <style>
 	.terminal-wrap {
+		position: relative;
 		display: flex;
 		height: 100%;
 		width: 100%;
@@ -230,5 +611,183 @@
 		min-height: 0;
 		width: 100%;
 		flex: 1 1 auto;
+	}
+	.terminal-error,
+	.terminal-notice {
+		position: absolute;
+		inset-inline: 0;
+		z-index: 20;
+		border-bottom: 1px solid var(--terminal-overlay-border);
+		background: var(--terminal-overlay-bg);
+		color: var(--terminal-overlay-fg);
+
+		--terminal-overlay-bg: rgb(250 250 250 / 0.97);
+		--terminal-overlay-fg: rgb(23 23 23);
+		--terminal-overlay-border: rgb(229 229 229);
+		--terminal-overlay-muted: rgb(115 115 115);
+		--terminal-overlay-panel: rgb(245 245 245);
+	}
+	.terminal-error.is-dark,
+	.terminal-notice.is-dark {
+		--terminal-overlay-bg: rgb(23 23 23 / 0.97);
+		--terminal-overlay-fg: rgb(245 245 245);
+		--terminal-overlay-border: rgb(64 64 64);
+		--terminal-overlay-muted: rgb(163 163 163);
+		--terminal-overlay-panel: rgb(38 38 38);
+	}
+	.terminal-error {
+		inset: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 1rem;
+	}
+	.terminal-error-copy {
+		display: flex;
+		width: min(100%, 40rem);
+		flex-direction: column;
+		gap: 0.5rem;
+		border: 1px solid var(--terminal-overlay-border);
+		border-radius: 0.75rem;
+		padding: 1rem;
+		background: var(--terminal-overlay-bg);
+		box-shadow: 0 8px 28px -8px rgba(20, 14, 8, 0.34);
+	}
+	.terminal-error-copy h2 {
+		font-size: 0.9375rem;
+		font-weight: 600;
+	}
+	.terminal-error-copy p,
+	.terminal-notice span,
+	.terminal-error-cause span {
+		font-size: 0.875rem;
+	}
+	.terminal-error-copy code,
+	.terminal-notice strong {
+		font-family: 'IBM Plex Mono', monospace;
+		font-size: 0.75rem;
+	}
+	.terminal-error-copy code {
+		color: var(--terminal-overlay-muted);
+	}
+	.terminal-error-cause {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+	}
+	.terminal-error-cause span {
+		color: var(--terminal-overlay-muted);
+	}
+	.terminal-error-cause pre {
+		overflow-x: auto;
+		border-radius: 0.5rem;
+		padding: 0.75rem;
+		background: var(--terminal-overlay-panel);
+		font-size: 0.75rem;
+		white-space: pre-wrap;
+		word-break: break-word;
+	}
+	.terminal-error-retry {
+		align-self: flex-start;
+		border-radius: 999px;
+		padding: 0.55rem 0.9rem;
+		background: var(--terminal-overlay-fg);
+		color: var(--terminal-overlay-bg);
+		font-size: 0.875rem;
+		font-weight: 600;
+	}
+	.terminal-error-retry:hover {
+		opacity: 0.92;
+	}
+	.terminal-error-retry:focus-visible {
+		outline: 2px solid var(--terminal-overlay-muted);
+		outline-offset: 2px;
+	}
+	.terminal-notice {
+		top: 0;
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		padding: 0.5rem 0.75rem;
+	}
+	.terminal-notice-dismiss {
+		margin-left: auto;
+		flex: 0 0 auto;
+		border-radius: 0.25rem;
+		padding: 0.25rem;
+		color: var(--terminal-overlay-muted);
+	}
+	.terminal-notice-dismiss:hover {
+		color: var(--terminal-overlay-fg);
+		background: var(--terminal-overlay-panel);
+	}
+	.terminal-notice-dismiss:focus-visible {
+		outline: 2px solid var(--terminal-overlay-muted);
+		outline-offset: 1px;
+	}
+
+	/* Overlaid, not in the flex flow: the terminal must not resize when the toast
+	   toggles — a reflow mid-login corrupts the agent's TUI. Colors follow the
+	   session's theme, like the xterm palette above; the shell's dark class does
+	   not reach into this component. */
+	.signin-toast {
+		position: absolute;
+		inset-inline: 0;
+		top: 0;
+		z-index: 10;
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.5rem 0.75rem;
+		font-size: 0.875rem;
+		border-bottom: 1px solid var(--toast-border);
+		background: var(--toast-bg);
+		color: var(--toast-fg);
+
+		--toast-bg: rgb(250 250 250 / 0.97);
+		--toast-fg: rgb(23 23 23);
+		--toast-border: rgb(229 229 229);
+		--toast-muted: rgb(115 115 115);
+		--toast-hover: rgb(229 229 229);
+	}
+	.signin-toast.is-dark {
+		--toast-bg: rgb(23 23 23 / 0.97);
+		--toast-fg: rgb(245 245 245);
+		--toast-border: rgb(64 64 64);
+		--toast-muted: rgb(163 163 163);
+		--toast-hover: rgb(64 64 64);
+	}
+	.signin-open {
+		display: flex;
+		min-width: 0;
+		flex: 1 1 auto;
+		align-items: center;
+		gap: 0.5rem;
+		text-align: left;
+		font-weight: 500;
+		color: inherit;
+	}
+	.signin-label {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.signin-dismiss {
+		flex: 0 0 auto;
+		border-radius: 0.25rem;
+		padding: 0.25rem;
+		color: var(--toast-muted);
+	}
+	.signin-open:hover,
+	.signin-dismiss:hover {
+		color: var(--toast-fg);
+	}
+	.signin-dismiss:hover {
+		background: var(--toast-hover);
+	}
+	.signin-open:focus-visible,
+	.signin-dismiss:focus-visible {
+		outline: 2px solid var(--toast-muted);
+		outline-offset: 1px;
 	}
 </style>

@@ -21,7 +21,7 @@ pub enum Agent {
 }
 
 impl Agent {
-    /// Canonical lowercase id, used as the `agent` context value and creds dir.
+    /// Canonical lowercase id, used as the `agent` context value.
     pub fn id(self) -> &'static str {
         match self {
             Agent::Claude => "claude",
@@ -30,7 +30,7 @@ impl Agent {
         }
     }
 
-    /// Installed binary name under `~/.local/bin`.
+    /// Installed binary name.
     pub fn binary(self) -> &'static str {
         match self {
             Agent::Claude => "claude",
@@ -56,15 +56,6 @@ impl Agent {
         }
     }
 
-    /// Environment variable that redirects the agent's config/creds home.
-    pub fn creds_env_var(self) -> Option<&'static str> {
-        match self {
-            Agent::Claude => Some("CLAUDE_CONFIG_DIR"),
-            Agent::Codex => Some("CODEX_HOME"),
-            Agent::Antigravity => None,
-        }
-    }
-
     /// Extra environment to run the installer unattended (skip interactive prompts).
     /// codex's installer otherwise prompts `Start Codex now? [y/N]` by reading
     /// `/dev/tty` directly (a closed stdin does not stop it), which hangs a headless
@@ -77,58 +68,63 @@ impl Agent {
     }
 }
 
-/// Absolute installed binary path for `agent`.
+/// Absolute binary path where Cowork's own installer puts `agent`; this is only
+/// the path we name when resolution fails after an install.
 pub fn bin_path(agent: Agent, home: &str) -> String {
     format!("{home}/.local/bin/{}", agent.binary())
 }
 
-/// Root directory for all routed agent credentials.
-pub fn creds_root(home: &str) -> String {
-    format!("{home}/.cowork/creds")
+/// The agent's own default config/credentials directory.
+///
+/// Cowork does not redirect credentials. The distro is already the isolation
+/// boundary; a second boundary inside it bought nothing, and the env-var exports
+/// that implemented the redirect went into `~/.bashrc`, which a non-interactive
+/// shell never reads — so it only ever applied to an interactive session anyway.
+pub fn config_dir(agent: Agent, home: &str) -> String {
+    match agent {
+        Agent::Claude => format!("{home}/.claude"),
+        Agent::Codex => format!("{home}/.codex"),
+        Agent::Antigravity => format!("{home}/.gemini/antigravity-cli"),
+    }
 }
 
-/// Routed credentials directory for `agent`.
-pub fn creds_dir(agent: Agent, home: &str) -> String {
-    format!("{}/{}", creds_root(home), agent.id())
-}
-
-/// Antigravity config path that reads `credentials.enc`.
-pub fn antigravity_link_path(home: &str) -> String {
-    format!("{home}/.gemini/antigravity-cli")
-}
-
-/// Parent directory for the Antigravity config symlink.
-pub fn antigravity_link_parent(home: &str) -> String {
-    format!("{home}/.gemini")
-}
-
-/// Curl-pipe-shell installer for `agent`, with credentials redirected when supported.
-pub fn install_cmd(agent: Agent, home: &str) -> Cmd {
+/// Curl-pipe-shell installer for `agent`.
+pub fn install_cmd(agent: Agent) -> Cmd {
     let script = pipe_install_script(agent.installer_url(), agent.installer_runner());
     let mut cmd = Cmd::new("bash", &["-c", &script]);
-    if let Some(var) = agent.creds_env_var() {
-        cmd = cmd.with_env(var, &creds_dir(agent, home));
-    }
     if let Some((var, val)) = agent.installer_unattended_env() {
         cmd = cmd.with_env(var, val);
     }
     cmd
 }
 
-/// `--version` verification command for the installed agent binary.
-pub fn verify_cmd(agent: Agent, home: &str) -> Cmd {
-    let mut cmd = Cmd::new(&bin_path(agent, home), &["--version"]);
-    if let Some(var) = agent.creds_env_var() {
-        cmd = cmd.with_env(var, &creds_dir(agent, home));
-    }
-    cmd
+/// `bash -lc 'command -v <binary>'` — ask a **login** shell where the agent's
+/// binary is. A login shell sources `~/.profile`, which puts `~/.local/bin`, the
+/// Homebrew prefix and mise's shims on `PATH` (see `bootstrap::command::profile_lines`);
+/// this process's own `PATH` has none of them. `command -v` is a shell builtin, so
+/// it also honours anything the user put on `PATH` themselves.
+pub fn resolve_cmd(agent: Agent) -> Cmd {
+    Cmd::new("bash", &["-lc", &format!("command -v {}", agent.binary())])
 }
 
-/// Shellrc export line for agents that support an env-based creds redirect.
-pub fn creds_export_line(agent: Agent, home: &str) -> Option<String> {
-    agent
-        .creds_env_var()
-        .map(|var| format!(r#"export {var}="{}""#, creds_dir(agent, home)))
+/// The absolute path `command -v` reported, or `None`.
+///
+/// `output` is the combined stdout+stderr of [`resolve_cmd`], and a login shell may
+/// print to either (a `~/.profile` that echoes, a MOTD). So: take the **last**
+/// line that is an absolute path. `command -v` prints a bare name for a shell
+/// builtin, function or alias — none of which we can exec — so anything that is
+/// not absolute is not a hit.
+pub fn parse_resolved_bin(output: &str) -> Option<String> {
+    output
+        .lines()
+        .map(str::trim)
+        .rfind(|line| line.starts_with('/'))
+        .map(str::to_string)
+}
+
+/// `--version` verification command for the resolved agent binary.
+pub fn verify_cmd(bin: &str) -> Cmd {
+    Cmd::new(bin, &["--version"])
 }
 
 /// `set -o pipefail; curl … | <runner>` — a curl-pipe-shell installer that fails
@@ -164,24 +160,19 @@ pub fn integrity_check_failed_envelope(agent: Agent) -> Envelope {
         .with_context("agent", agent.id())
 }
 
-/// `internal.unknown` for AgentInstall-stage filesystem/routing failures.
-pub fn internal_unknown_envelope(detail: &str) -> Envelope {
-    Envelope::new(Code::InternalUnknown, Stage::AgentInstall).with_context("detail", detail)
-}
-
 /// Stable install step key for `agent`.
 pub fn install_step(agent: Agent) -> String {
     format!("install-{}", agent.id())
 }
 
+/// Stable resolve step key for `agent`.
+pub fn resolve_step(agent: Agent) -> String {
+    format!("resolve-{}", agent.id())
+}
+
 /// Stable verify step key for `agent`.
 pub fn verify_step(agent: Agent) -> String {
     format!("verify-{}", agent.id())
-}
-
-/// Stable credential-routing step key for `agent`.
-pub fn creds_step(agent: Agent) -> String {
-    format!("creds-{}", agent.id())
 }
 
 #[cfg(test)]
@@ -190,41 +181,29 @@ mod tests {
 
     #[test]
     fn claude_install_cmd_is_curl_pipe_bash() {
-        let c = install_cmd(Agent::Claude, "/home/u");
+        let c = install_cmd(Agent::Claude);
         assert_eq!(c.program, "bash");
         assert_eq!(c.args[0], "-c");
         assert!(c.args[1].contains("set -o pipefail"));
         assert!(c.args[1].contains("https://claude.ai/install.sh"));
         assert!(c.args[1].ends_with("| bash"));
-        assert_eq!(
-            c.env,
-            vec![(
-                "CLAUDE_CONFIG_DIR".to_string(),
-                "/home/u/.cowork/creds/claude".to_string()
-            )]
-        );
+        assert!(c.env.is_empty());
     }
 
     #[test]
-    fn codex_install_cmd_pipes_to_sh_and_sets_codex_home() {
-        let c = install_cmd(Agent::Codex, "/home/u");
+    fn codex_install_cmd_pipes_to_sh_and_sets_non_interactive_env() {
+        let c = install_cmd(Agent::Codex);
         assert!(c.args[1].contains("https://chatgpt.com/codex/install.sh"));
         assert!(c.args[1].ends_with("| sh"));
         assert_eq!(
             c.env,
-            vec![
-                (
-                    "CODEX_HOME".to_string(),
-                    "/home/u/.cowork/creds/codex".to_string()
-                ),
-                ("CODEX_NON_INTERACTIVE".to_string(), "1".to_string())
-            ]
+            vec![("CODEX_NON_INTERACTIVE".to_string(), "1".to_string())]
         );
     }
 
     #[test]
-    fn antigravity_install_cmd_has_no_creds_env() {
-        let c = install_cmd(Agent::Antigravity, "/home/u");
+    fn antigravity_install_cmd_has_no_env() {
+        let c = install_cmd(Agent::Antigravity);
         assert!(c.args[1].contains("https://antigravity.google/cli/install.sh"));
         assert!(c.args[1].ends_with("| bash"));
         assert!(c.env.is_empty());
@@ -233,35 +212,70 @@ mod tests {
     #[test]
     fn only_codex_install_cmd_sets_non_interactive_env() {
         for agent in [Agent::Claude, Agent::Antigravity] {
-            let c = install_cmd(agent, "/home/u");
+            let c = install_cmd(agent);
             assert!(!c.env.iter().any(|(key, _)| key == "CODEX_NON_INTERACTIVE"));
         }
     }
 
     #[test]
-    fn verify_cmd_runs_versioned_binary_at_local_bin() {
-        for agent in [Agent::Claude, Agent::Codex, Agent::Antigravity] {
-            let c = verify_cmd(agent, "/home/u");
-            assert_eq!(c.program, bin_path(agent, "/home/u"));
-            assert_eq!(c.args, vec!["--version".to_string()]);
-            match agent {
-                Agent::Claude => assert_eq!(
-                    c.env,
-                    vec![(
-                        "CLAUDE_CONFIG_DIR".to_string(),
-                        "/home/u/.cowork/creds/claude".to_string()
-                    )]
-                ),
-                Agent::Codex => assert_eq!(
-                    c.env,
-                    vec![(
-                        "CODEX_HOME".to_string(),
-                        "/home/u/.cowork/creds/codex".to_string()
-                    )]
-                ),
-                Agent::Antigravity => assert!(c.env.is_empty()),
-            }
-        }
+    fn resolve_cmd_uses_login_shell_command_v() {
+        let c = resolve_cmd(Agent::Claude);
+        assert_eq!(c.program, "bash");
+        assert_eq!(
+            c.args,
+            vec!["-lc".to_string(), "command -v claude".to_string()]
+        );
+        assert!(c.env.is_empty());
+    }
+
+    #[test]
+    fn parse_resolved_bin_accepts_absolute_path() {
+        assert_eq!(
+            parse_resolved_bin("/home/u/.local/bin/claude\n"),
+            Some("/home/u/.local/bin/claude".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_resolved_bin_rejects_empty_output() {
+        assert_eq!(parse_resolved_bin(""), None);
+    }
+
+    #[test]
+    fn parse_resolved_bin_rejects_bare_builtin_name() {
+        assert_eq!(parse_resolved_bin("claude\n"), None);
+    }
+
+    #[test]
+    fn parse_resolved_bin_ignores_noise_before_answer() {
+        assert_eq!(
+            parse_resolved_bin("some banner\n/usr/local/bin/codex\n"),
+            Some("/usr/local/bin/codex".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_resolved_bin_takes_last_absolute_line() {
+        assert_eq!(
+            parse_resolved_bin("/first/claude\n/second/claude\n"),
+            Some("/second/claude".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_resolved_bin_trims_path_whitespace() {
+        assert_eq!(
+            parse_resolved_bin("  /home/u/.local/bin/agy  \n"),
+            Some("/home/u/.local/bin/agy".to_string())
+        );
+    }
+
+    #[test]
+    fn verify_cmd_runs_versioned_resolved_binary() {
+        let c = verify_cmd("/usr/local/bin/claude");
+        assert_eq!(c.program, "/usr/local/bin/claude");
+        assert_eq!(c.args, vec!["--version".to_string()]);
+        assert!(c.env.is_empty());
     }
 
     #[test]
@@ -281,29 +295,13 @@ mod tests {
     }
 
     #[test]
-    fn creds_paths() {
-        assert_eq!(creds_root("/home/u"), "/home/u/.cowork/creds");
+    fn config_dirs_are_agent_defaults() {
+        assert_eq!(config_dir(Agent::Claude, "/home/u"), "/home/u/.claude");
+        assert_eq!(config_dir(Agent::Codex, "/home/u"), "/home/u/.codex");
         assert_eq!(
-            creds_dir(Agent::Codex, "/home/u"),
-            "/home/u/.cowork/creds/codex"
-        );
-        assert_eq!(
-            antigravity_link_path("/home/u"),
+            config_dir(Agent::Antigravity, "/home/u"),
             "/home/u/.gemini/antigravity-cli"
         );
-    }
-
-    #[test]
-    fn creds_export_line_only_for_env_agents() {
-        assert_eq!(
-            creds_export_line(Agent::Claude, "/home/u"),
-            Some(r#"export CLAUDE_CONFIG_DIR="/home/u/.cowork/creds/claude""#.to_string())
-        );
-        assert_eq!(
-            creds_export_line(Agent::Codex, "/home/u"),
-            Some(r#"export CODEX_HOME="/home/u/.cowork/creds/codex""#.to_string())
-        );
-        assert_eq!(creds_export_line(Agent::Antigravity, "/home/u"), None);
     }
 
     #[test]
@@ -329,8 +327,8 @@ mod tests {
 
     #[test]
     fn step_keys() {
+        assert_eq!(resolve_step(Agent::Claude), "resolve-claude");
         assert_eq!(install_step(Agent::Claude), "install-claude");
         assert_eq!(verify_step(Agent::Codex), "verify-codex");
-        assert_eq!(creds_step(Agent::Antigravity), "creds-antigravity");
     }
 }

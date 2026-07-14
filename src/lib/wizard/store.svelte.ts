@@ -6,12 +6,13 @@
 
 import type { Envelope } from '$lib/errors/registry';
 import type { HostClient } from '$lib/host/client';
-import type { AgentId } from '$lib/terminal/login';
+import type { AgentId } from '$lib/terminal/agent';
 import { asEnvelope } from '$lib/host/client';
-import { isValidSelection, parseAgentIds, toggleAgent } from './agents';
+import { isValidSelection, toggleAgent } from './agents';
 import { retryDelayMs, shouldAutoRetry } from './affordance';
+import { loadBootstrapState } from './bootstrap';
 import { firstPreflightFailure, RUNNER_STEPS, type RunnerStep } from './runner';
-import { initialStep, isOnboardingStep, nextStep, prevStep, type WizardStep } from './steps';
+import { isInterstitialStep, isOnboardingStep, nextStep, prevStep, type WizardStep } from './steps';
 
 export interface Wizard {
 	readonly step: WizardStep;
@@ -79,6 +80,8 @@ export function createWizard(host: HostClient): Wizard {
 		step = nextStep(step);
 		if (RUNNER_STEPS.some((s) => s.id === step)) {
 			void runActive();
+		} else if (isInterstitialStep(step)) {
+			return;
 		} else {
 			done = true;
 			void host.clearResume();
@@ -165,16 +168,12 @@ export function createWizard(host: HostClient): Wizard {
 		},
 		async bootstrap() {
 			try {
-				if (await host.isResumeLaunch()) {
-					const resume = await host.getResumeState();
-					if (resume) {
-						selectedAgents = parseAgentIds(resume.selectedAgents);
-						step = initialStep(resume);
-						void runActive();
-						return;
-					}
+				const boot = await loadBootstrapState(host);
+				selectedAgents = boot.selectedAgents;
+				step = boot.step;
+				if (boot.resumed) {
+					void runActive();
 				}
-				step = initialStep(null);
 			} catch (caught) {
 				error = asEnvelope(caught);
 			}

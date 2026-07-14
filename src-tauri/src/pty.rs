@@ -7,15 +7,15 @@
 //! clippy'd on the windows-latest CI host job (src-tauri does not build
 //! off-Windows).
 
-use std::io::Read;
-
 use base64::Engine;
-use cowork_errors::{Envelope, Stage};
+use cowork_errors::{Code, Envelope, Stage};
 use cowork_host::pty::{
     PtyRegistry, WindowsPtySession, pty_bridge_failed_envelope, terminal_launch,
 };
+use std::io::Read;
 use tauri::State;
 use tauri::ipc::Channel;
+use uuid::Uuid;
 
 pub type PtyState = PtyRegistry<WindowsPtySession>;
 
@@ -29,30 +29,50 @@ const READ_CHUNK: usize = 4096;
 /// distro at `workspace`. The frontend creates `onData` (a `Channel<String>`)
 /// and passes the already-fitted `rows`/`cols`, so the ConPTY is the correct
 /// size from the first byte (never hardcode a default — that corrupts the first
-/// frame of full-screen TUIs). Each `onData` message is base64 of one raw PTY
-/// output chunk; the frontend base64-decodes to bytes and writes them to xterm.
+/// frame of full-screen TUIs). Optional `autorun` stays attached to the spawn
+/// request so retries replay the launch command without a frontend-side race.
+/// Each `onData` message is base64 of one raw PTY output chunk; the frontend
+/// base64-decodes to bytes and writes them to xterm.
+// A Tauri command's parameter list IS the IPC payload; grouping these into a
+// struct would only hide the same fields behind an indirection the frontend
+// would still have to spell out.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub fn pty_spawn(
     state: State<'_, PtyState>,
+    id: String,
     on_data: Channel<String>,
     distro: String,
     workspace: String,
     locale: String,
     rows: u16,
     cols: u16,
-) -> Result<u64, Envelope> {
-    let cmd = terminal_launch(&distro, &workspace, &locale);
+    autorun: Option<String>,
+) -> Result<(), Envelope> {
+    validate_session_id(&id, STAGE)?;
+    let cmd = terminal_launch(&distro, &workspace, &locale, autorun.as_deref());
     let mut session = WindowsPtySession::spawn(&cmd, rows, cols, STAGE)?;
-    let reader = session
-        .take_reader()
-        .ok_or_else(|| pty_bridge_failed_envelope(STAGE, "pty reader unavailable"))?;
+    let reader = match session.take_reader() {
+        Some(reader) => reader,
+        None => {
+            let error = pty_bridge_failed_envelope(STAGE, "pty reader unavailable");
+            let _ = session.kill(STAGE);
+            return Err(error);
+        }
+    };
+
+    if let Some(previous) = state.insert(id.clone(), session) {
+        let _ = previous
+            .lock()
+            .expect("PtyRegistry session mutex poisoned")
+            .kill(STAGE);
+    }
 
     // Pump PTY output → channel on a dedicated thread. The reader is an
     // independent handle from the writer/master kept in state, so the pump never
     // contends on the state mutex.
     std::thread::spawn(move || pump(reader, on_data));
-
-    Ok(state.insert(session))
+    Ok(())
 }
 
 /// Read loop: base64-frame each chunk onto the channel until EOF or the channel
@@ -78,8 +98,9 @@ fn pump(mut reader: Box<dyn Read + Send>, on_data: Channel<String>) {
 
 /// Forward user keystrokes (xterm `onData`, a UTF-8 string) to the PTY.
 #[tauri::command]
-pub fn pty_write(state: State<'_, PtyState>, id: u64, data: String) -> Result<(), Envelope> {
-    match state.get(id) {
+pub fn pty_write(state: State<'_, PtyState>, id: String, data: String) -> Result<(), Envelope> {
+    validate_session_id(&id, STAGE)?;
+    match state.get(&id) {
         Some(session) => session
             .lock()
             .expect("PtyRegistry session mutex poisoned")
@@ -92,11 +113,12 @@ pub fn pty_write(state: State<'_, PtyState>, id: u64, data: String) -> Result<()
 #[tauri::command]
 pub fn pty_resize(
     state: State<'_, PtyState>,
-    id: u64,
+    id: String,
     rows: u16,
     cols: u16,
 ) -> Result<(), Envelope> {
-    match state.get(id) {
+    validate_session_id(&id, STAGE)?;
+    match state.get(&id) {
         Some(session) => session
             .lock()
             .expect("PtyRegistry session mutex poisoned")
@@ -107,8 +129,9 @@ pub fn pty_resize(
 
 /// Kill the session. Unknown/already-removed ids are a no-op.
 #[tauri::command]
-pub fn pty_kill(state: State<'_, PtyState>, id: u64) -> Result<(), Envelope> {
-    match state.remove(id) {
+pub fn pty_kill(state: State<'_, PtyState>, id: String) -> Result<(), Envelope> {
+    validate_session_id(&id, STAGE)?;
+    match state.remove(&id) {
         Some(session) => session
             .lock()
             .expect("PtyRegistry session mutex poisoned")
@@ -120,10 +143,24 @@ pub fn pty_kill(state: State<'_, PtyState>, id: u64) -> Result<(), Envelope> {
 /// Kill every live session (window destroyed). Errors are ignored: the children
 /// are being torn down with the app and there is no surface left to report to.
 pub fn kill_all(state: &PtyState) {
+    let mut joins = Vec::new();
     for session in state.drain() {
-        let _ = session
-            .lock()
-            .expect("PtyRegistry session mutex poisoned")
-            .kill(STAGE);
+        joins.push(std::thread::spawn(move || {
+            let _ = session
+                .lock()
+                .expect("PtyRegistry session mutex poisoned")
+                .kill(STAGE);
+        }));
+    }
+    for join in joins {
+        let _ = join.join();
+    }
+}
+
+fn validate_session_id(id: &str, stage: Stage) -> Result<(), Envelope> {
+    if Uuid::parse_str(id).is_ok() {
+        Ok(())
+    } else {
+        Err(Envelope::new(Code::HostPtyBridgeFailed, stage).with_context("id", id.to_string()))
     }
 }

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { SessionDto, WorkspaceDto } from '$lib/host/types';
 	import * as m from '$lib/paraglide/messages';
-	import type { AgentId } from '$lib/terminal/login';
+	import type { AgentId } from '$lib/terminal/agent';
 	import AgentIcon from './AgentIcon.svelte';
 	import { brand, type SessionStatus } from './model';
 
@@ -24,66 +24,103 @@
 	} = $props();
 
 	const AGENTS: readonly AgentId[] = ['claude', 'codex', 'antigravity'];
+	const PICKER_WIDTH = 160;
+	const EDGE_GAP = 8;
+
 	let pickerOpen = $state(false);
+	let pickBtn: HTMLButtonElement | undefined = $state();
+	let pickerPos = $state({ top: 0, left: 0 });
+
+	// The actions live INSIDE the scrolling rail (⊕ sits right after the last tab,
+	// as browsers do), and that rail clips — which is what hid this menu once
+	// already. So the menu escapes every clipping ancestor with position: fixed,
+	// anchored to the button's measured rect and clamped to the window. It is
+	// closed on scroll/resize rather than re-measured, because a menu that drifts
+	// away from its button is worse than one that closes.
+	function openPicker(): void {
+		const rect = pickBtn?.getBoundingClientRect();
+		if (!rect) return;
+		const maxLeft = window.innerWidth - PICKER_WIDTH - EDGE_GAP;
+		pickerPos = {
+			top: rect.bottom + 4,
+			left: Math.max(EDGE_GAP, Math.min(rect.left, maxLeft))
+		};
+		pickerOpen = true;
+	}
 </script>
 
-<svelte:window onclick={() => (pickerOpen = false)} />
+<svelte:window
+	onclick={() => (pickerOpen = false)}
+	onresize={() => (pickerOpen = false)}
+	onscroll={() => (pickerOpen = false)}
+/>
 
-<div class="tabbar" role="tablist">
-	{#each tabs as tab (tab.id)}
-		<div class="tab" class:is-active={tab.id === activeId}>
-			<button
-				type="button"
-				role="tab"
-				aria-selected={tab.id === activeId}
-				class="tab-main"
-				onclick={() => onactivate(tab.id)}
-			>
-				<span class="dot st-{statuses[tab.id] ?? 'cold'}" aria-hidden="true"></span>
-				<AgentIcon agent={tab.agent} />
-				<span class="tab-title">{tab.title}</span>
+<div class="tabbar">
+	<div class="tabrail" role="tablist">
+		{#each tabs as tab (tab.id)}
+			<div class="tab" class:is-active={tab.id === activeId}>
+				<button
+					type="button"
+					role="tab"
+					aria-selected={tab.id === activeId}
+					class="tab-main"
+					onclick={() => onactivate(tab.id)}
+				>
+					<span class="dot st-{statuses[tab.id] ?? 'cold'}" aria-hidden="true"></span>
+					<AgentIcon agent={tab.agent} />
+					<span class="tab-title">{tab.title}</span>
+				</button>
+				<button
+					type="button"
+					class="tab-close"
+					aria-label={m.tab_close()}
+					onclick={() => onclose(tab.id)}>×</button
+				>
+			</div>
+		{/each}
+		<div class="tabactions">
+			<button type="button" class="addbtn" title={m.tab_new()} onclick={() => oncreate(null)}>
+				＋
 			</button>
 			<button
+				bind:this={pickBtn}
 				type="button"
-				class="tab-close"
-				aria-label={m.tab_close()}
-				onclick={() => onclose(tab.id)}>×</button
+				class="pickbtn"
+				aria-label={m.tab_new_with()}
+				onclick={(event) => {
+					event.stopPropagation();
+					if (pickerOpen) pickerOpen = false;
+					else openPicker();
+				}}>▾</button
 			>
 		</div>
-	{/each}
-	<button type="button" class="addbtn" title={m.tab_new()} onclick={() => oncreate(null)}>
-		＋
-	</button>
-	<div class="addwrap">
-		<button
-			type="button"
-			class="pickbtn"
-			aria-label={m.tab_new_with()}
-			onclick={(event) => {
-				event.stopPropagation();
-				pickerOpen = !pickerOpen;
-			}}>▾</button
-		>
-		{#if pickerOpen}
-			<div class="picker" role="menu">
-				{#each AGENTS as agent (agent)}
-					<button
-						type="button"
-						class="picker-item"
-						class:is-default={agent === workspace.defaultAgent}
-						onclick={() => {
-							pickerOpen = false;
-							oncreate(agent);
-						}}
-					>
-						<AgentIcon {agent} />
-						<span>{brand(agent)}</span>
-					</button>
-				{/each}
-			</div>
-		{/if}
 	</div>
 </div>
+
+{#if pickerOpen}
+	<div
+		class="picker"
+		role="menu"
+		style:top={`${pickerPos.top}px`}
+		style:left={`${pickerPos.left}px`}
+		style:width={`${PICKER_WIDTH}px`}
+	>
+		{#each AGENTS as agent (agent)}
+			<button
+				type="button"
+				class="picker-item"
+				class:is-default={agent === workspace.defaultAgent}
+				onclick={() => {
+					pickerOpen = false;
+					oncreate(agent);
+				}}
+			>
+				<AgentIcon {agent} />
+				<span>{brand(agent)}</span>
+			</button>
+		{/each}
+	</div>
+{/if}
 
 <style>
 	.tabbar {
@@ -94,7 +131,17 @@
 		padding: 0 10px;
 		border-bottom: 1px solid var(--line);
 		background: var(--paper);
-		overflow-x: auto;
+		overflow: visible;
+	}
+	.tabrail {
+		display: flex;
+		min-width: 0;
+		flex: 1 1 auto;
+		align-items: center;
+		gap: 4px;
+		overflow: auto hidden;
+		padding-bottom: 1px;
+		scrollbar-width: thin;
 	}
 	.tab {
 		display: inline-flex;
@@ -179,18 +226,19 @@
 	}
 	.pickbtn {
 		font-size: 10px;
-		margin-left: -4px;
 	}
-	.addwrap {
-		position: relative;
+	.tabactions {
+		display: flex;
 		flex: 0 0 auto;
+		align-items: center;
+		gap: 4px;
 	}
+	/* Rendered at the component root, outside the clipping rail, and positioned
+	   from the button's measured rect (see openPicker). Fixed, so no ancestor's
+	   overflow can cut it off and no ancestor's scroll can carry it away. */
 	.picker {
-		position: absolute;
-		top: calc(100% + 4px);
-		left: 0;
+		position: fixed;
 		z-index: 30;
-		min-width: 140px;
 		padding: 4px;
 		border-radius: 10px;
 		background: var(--menu-bg);

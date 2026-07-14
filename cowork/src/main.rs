@@ -11,6 +11,7 @@
 mod agent;
 mod bootstrap;
 mod cmd;
+mod preset;
 mod sink;
 mod workspace;
 
@@ -19,9 +20,8 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 
 use agent::{
-    Agent, AgentConfig, AgentInstallOutcome, AgyThemeOutcome, AppTheme, AuthStatusOutcome,
-    LinuxAgentOps, SessionUuidOutcome, run_agent_install, run_agy_theme, run_auth_status,
-    run_session_uuid,
+    Agent, AgentConfig, AgentInstallOutcome, AgyThemeOutcome, AppTheme, LinuxAgentOps,
+    SessionUuidOutcome, run_agent_install, run_agy_theme, run_session_check, run_session_uuid,
 };
 use bootstrap::{BootstrapOutcome, Config, LinuxOps, run_bootstrap};
 use sink::StdoutSink;
@@ -53,13 +53,6 @@ enum Command {
         #[arg(long = "agent", required = true)]
         agents: Vec<Agent>,
     },
-    /// Probe whether an agent's local credentials are valid (v0.2 WP4), emitting
-    /// the JSON-lines protocol on stdout.
-    AuthStatus {
-        /// The agent to probe: claude | codex | antigravity.
-        #[arg(long)]
-        agent: Agent,
-    },
     /// Capture the newest agent conversation UUID for a workspace (since a spawn time).
     SessionUuid {
         #[arg(long)]
@@ -68,6 +61,13 @@ enum Command {
         slug: String,
         #[arg(long)]
         since_ms: u64,
+    },
+    /// Check whether an agent conversation UUID already exists.
+    SessionCheck {
+        #[arg(long)]
+        agent: Agent,
+        #[arg(long)]
+        uuid: String,
     },
     /// Write antigravity's colorScheme to match the app theme (before an agy spawn).
     AgentTheme {
@@ -88,6 +88,8 @@ enum WorkspaceCmd {
     Create {
         #[arg(long)]
         slug: String,
+        #[arg(long, default_value = "blank")]
+        preset: String,
     },
     /// Remove ~/workspaces/<slug>/ recursively (idempotent).
     Remove {
@@ -137,18 +139,6 @@ fn main() -> ExitCode {
                 }
             }
         }
-        Some(Command::AuthStatus { agent }) => {
-            let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
-            let mut ops = LinuxAgentOps;
-            let mut sink = StdoutSink;
-            match run_auth_status(&mut ops, &mut sink, agent, &home) {
-                AuthStatusOutcome::Done => ExitCode::SUCCESS,
-                AuthStatusOutcome::Failed(env) => {
-                    eprintln!("cowork: auth status failed ({:?})", env.code);
-                    ExitCode::FAILURE
-                }
-            }
-        }
         Some(Command::SessionUuid {
             agent,
             slug,
@@ -160,6 +150,17 @@ fn main() -> ExitCode {
                 SessionUuidOutcome::Done => ExitCode::SUCCESS,
                 SessionUuidOutcome::Failed(env) => {
                     eprintln!("cowork: session uuid failed ({:?})", env.code);
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some(Command::SessionCheck { agent, uuid }) => {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+            let mut sink = StdoutSink;
+            match run_session_check(&mut sink, agent, &home, &uuid) {
+                SessionUuidOutcome::Done => ExitCode::SUCCESS,
+                SessionUuidOutcome::Failed(env) => {
+                    eprintln!("cowork: session check failed ({:?})", env.code);
                     ExitCode::FAILURE
                 }
             }
@@ -179,7 +180,7 @@ fn main() -> ExitCode {
             let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
             let mut sink = StdoutSink;
             let action = match action {
-                WorkspaceCmd::Create { slug } => WorkspaceAction::Create { slug },
+                WorkspaceCmd::Create { slug, preset } => WorkspaceAction::Create { slug, preset },
                 WorkspaceCmd::Remove { slug } => WorkspaceAction::Remove { slug },
             };
             match run_workspace(&action, &home, &mut sink) {

@@ -11,7 +11,7 @@
 //! stays host-agnostic (enforced by the host/guest-separation conformance gate)
 //! so a future Mac/Linux host is "write a new host driver", not a rewrite.
 
-mod auth;
+mod build_info;
 mod pty;
 mod session;
 mod setup;
@@ -22,6 +22,12 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .manage(pty::PtyState::default())
@@ -33,6 +39,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            build_info::app_build,
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,
@@ -40,10 +47,10 @@ pub fn run() {
             setup::preflight_run,
             setup::wsl_enable,
             setup::provision_run,
+            setup::guest_sync,
             setup::guest_bootstrap,
             setup::guest_agent_install,
             setup::remove_cowork_distro,
-            setup::is_resume_launch,
             setup::get_resume_state,
             setup::clear_resume,
             setup::setup_is_complete,
@@ -54,8 +61,8 @@ pub fn run() {
             workspace::workspace_delete,
             workspace::workspace_slug_preview,
             workspace::workspace_open_files,
-            auth::verify_agent_auth,
             session::capture_session_uuid,
+            session::session_check,
             session::agent_theme_sync,
         ])
         .run(tauri::generate_context!())

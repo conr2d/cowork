@@ -3,7 +3,9 @@
 
 	import Terminal from '$lib/components/Terminal.svelte';
 	import type { Envelope } from '$lib/errors/registry';
-	import { tauriHost } from '$lib/host/client';
+	import { formatAppBuild, loadAppBuild } from '$lib/host/build';
+	import { asEnvelope, tauriHost } from '$lib/host/client';
+	import type { AppBuildDto } from '$lib/host/types';
 	import type { WorkspaceDto } from '$lib/host/types';
 	import * as m from '$lib/paraglide/messages';
 	import { getLocale } from '$lib/paraglide/runtime';
@@ -19,6 +21,7 @@
 	const shell = createShell(tauriHost);
 
 	let theme = $state(loadTheme());
+	let build = $state<AppBuildDto | null>(null);
 	const manager = createSessionManager(shell, tauriHost, () => theme);
 	let collapsed = $state(loadCollapsed());
 	let newWorkspaceOpen = $state(false);
@@ -50,8 +53,21 @@
 	});
 
 	onMount(() => {
-		void shell.load();
+		void (async () => {
+			build = await loadAppBuild(tauriHost);
+			let syncError: Envelope | null = null;
+			// Sync before anything probes the guest: a rebuilt app or a missing/corrupt
+			// installed binary must re-inject the shipped bytes into the distro.
+			// Best-effort: a failed sync still boots, but the shell surfaces the failure.
+			await tauriHost.guestSync().catch((caught) => {
+				syncError = asEnvelope(caught);
+			});
+			await shell.load();
+			if (syncError) shell.reportError(syncError);
+		})();
 	});
+
+	const buildLabel = $derived(build ? formatAppBuild(build) : null);
 
 	function toggleTheme(): void {
 		theme = theme === 'dark' ? 'light' : 'dark';
@@ -99,6 +115,7 @@
 <div class="shell" class:collapsed class:dark={theme === 'dark'}>
 	<Sidebar
 		{shell}
+		{buildLabel}
 		{collapsed}
 		{theme}
 		{renamingSlug}
@@ -114,70 +131,72 @@
 	/>
 
 	<main class="main">
-		<div class="ctxbar">
+		<div class="chrome">
+			<div class="ctxbar">
+				{#if shell.active}
+					<span class="ctx-name">{shell.active.name}</span>
+					<span class="ctx-path">~/workspaces/{shell.active.slug}</span>
+				{/if}
+				<span class="ctx-spacer"></span>
+				<button
+					type="button"
+					class="btn"
+					disabled={!shell.active}
+					title={m.shell_files()}
+					onclick={() => {
+						if (shell.active) void shell.openFiles(shell.active.slug);
+					}}
+				>
+					<svg viewBox="0 0 24 24" width="15" height="15">
+						<path
+							d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"
+						/>
+					</svg>
+					{m.shell_files()}
+				</button>
+			</div>
+
 			{#if shell.active}
-				<span class="ctx-name">{shell.active.name}</span>
-				<span class="ctx-path">~/workspaces/{shell.active.slug}</span>
+				<TabStrip
+					workspace={shell.active}
+					tabs={sortedSessions(shell.active.sessions)}
+					activeId={manager.activeOf(shell.active.slug)}
+					statuses={manager.statuses}
+					oncreate={(agent) => {
+						if (shell.active) void manager.create(shell.active, agent);
+					}}
+					onactivate={(id) => {
+						if (shell.active) void manager.activate(shell.active, id);
+					}}
+					onclose={(id) => {
+						if (shell.active) void manager.close(shell.active, id);
+					}}
+				/>
 			{/if}
-			<span class="ctx-spacer"></span>
-			<button
-				type="button"
-				class="btn"
-				disabled={!shell.active}
-				title={m.shell_files()}
-				onclick={() => {
-					if (shell.active) void shell.openFiles(shell.active.slug);
-				}}
-			>
-				<svg viewBox="0 0 24 24" width="15" height="15">
-					<path
-						d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"
-					/>
-				</svg>
-				{m.shell_files()}
-			</button>
+
+			{#if manager.advisorySlug !== null}
+				<div class="advisorybar">
+					<span>{m.session_advisory()}</span>
+					<button
+						type="button"
+						aria-label={m.action_cancel()}
+						onclick={() => manager.dismissAdvisory()}>×</button
+					>
+				</div>
+			{/if}
+
+			{#if visibleError}
+				<div class="errorbar">
+					<span>{m.error_title()}</span>
+					<code>{visibleError.code}</code>
+					<button
+						type="button"
+						aria-label={m.action_cancel()}
+						onclick={() => (dismissedError = visibleError)}>×</button
+					>
+				</div>
+			{/if}
 		</div>
-
-		{#if shell.active}
-			<TabStrip
-				workspace={shell.active}
-				tabs={sortedSessions(shell.active.sessions)}
-				activeId={manager.activeOf(shell.active.slug)}
-				statuses={manager.statuses}
-				oncreate={(agent) => {
-					if (shell.active) void manager.create(shell.active, agent);
-				}}
-				onactivate={(id) => {
-					if (shell.active) void manager.activate(shell.active, id);
-				}}
-				onclose={(id) => {
-					if (shell.active) void manager.close(shell.active, id);
-				}}
-			/>
-		{/if}
-
-		{#if manager.advisorySlug !== null}
-			<div class="advisorybar">
-				<span>{m.session_advisory()}</span>
-				<button
-					type="button"
-					aria-label={m.action_cancel()}
-					onclick={() => manager.dismissAdvisory()}>×</button
-				>
-			</div>
-		{/if}
-
-		{#if visibleError}
-			<div class="errorbar">
-				<span>{m.error_title()}</span>
-				<code>{visibleError.code}</code>
-				<button
-					type="button"
-					aria-label={m.action_cancel()}
-					onclick={() => (dismissedError = visibleError)}>×</button
-				>
-			</div>
-		{/if}
 
 		<section class="term">
 			{#if shell.loading}
@@ -196,18 +215,17 @@
 				{#if workspace && session}
 					{@const isActive =
 						ref.slug === shell.activeSlug && manager.activeOf(ref.slug) === session.id}
+					{@const launch = manager.launchPlan(session.id, session.agentSessionUuid ?? null)}
 					<div class="term-slot" class:is-active={isActive}>
 						<Terminal
+							sessionId={session.id}
 							distro="Cowork"
 							workspace={`~/workspaces/${ref.slug}`}
 							locale={getLocale()}
 							{theme}
 							active={isActive}
-							autorun={sessionLaunch(
-								session.agent,
-								session.agentSessionUuid ?? null,
-								manager.isRestore(session.id)
-							)}
+							detectLinks
+							autorun={sessionLaunch(session.agent, launch.uuid, launch.resume)}
 							onactivity={(event) => manager.noteActivity(session.id, event)}
 							onspawn={() => manager.noteSpawn(session.id)}
 						/>
@@ -280,6 +298,7 @@
 		color: var(--ink);
 		background: var(--paper);
 		-webkit-font-smoothing: antialiased;
+		overflow: hidden;
 	}
 	.shell.dark {
 		--paper: #1a1916;
@@ -304,11 +323,18 @@
 			opacity 0.16s ease;
 	}
 	.main {
+		position: relative;
 		flex: 1 1 auto;
 		display: flex;
 		flex-direction: column;
 		min-width: 0;
+		min-height: 0;
 		background: var(--term-bg);
+		overflow: hidden;
+	}
+	.chrome {
+		position: relative;
+		z-index: 1;
 	}
 	.ctxbar {
 		display: flex;
@@ -400,10 +426,12 @@
 	}
 	.term {
 		position: relative;
+		z-index: 0;
 		flex: 1 1 auto;
 		min-height: 0;
 		background: var(--term-bg);
 		color: var(--term-fg);
+		overflow: hidden;
 	}
 	.term-slot {
 		position: absolute;

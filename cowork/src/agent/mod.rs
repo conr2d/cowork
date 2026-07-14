@@ -1,13 +1,13 @@
 //! Agent-install orchestration (WP7): the ordered sequence for the selected
 //! agents, emitting the guest→host JSON-lines protocol.
 //!
-//! For each agent the sequence is: install (hang-guarded) → verify the binary →
-//! route credentials. The first failure emits a structured `Error` envelope and
-//! stops. This mirrors [`crate::bootstrap`]: all decision logic is pure and
-//! unit-tested against a mock [`AgentOps`]; the real process/filesystem glue is
-//! [`LinuxAgentOps`].
+//! For each agent the sequence is: resolve → install if absent (hang-guarded) →
+//! verify the resolved binary. An agent the user already has is used as-is.
+//! Agents keep their own default config paths inside the distro. The first
+//! failure emits a structured `Error` envelope and stops. This mirrors
+//! [`crate::bootstrap`]: all decision logic is pure and unit-tested against a
+//! mock [`AgentOps`]; the real process/filesystem glue is [`LinuxAgentOps`].
 
-mod auth;
 mod command;
 mod ops;
 mod session;
@@ -19,10 +19,9 @@ use cowork_errors::Envelope;
 use cowork_errors::Stage;
 use cowork_errors::protocol::{Message, PROTOCOL_VERSION};
 
-pub use auth::{AuthStatusOutcome, run_auth_status};
 pub use command::Agent;
 pub use ops::{AgentOps, InstallOutcome, LinuxAgentOps};
-pub use session::{SessionUuidOutcome, run_session_uuid};
+pub use session::{SessionUuidOutcome, run_session_check, run_session_uuid};
 pub use theme::{AgyThemeOutcome, AppTheme, run_agy_theme};
 
 use crate::sink::ProgressSink;
@@ -81,84 +80,56 @@ fn install_one(
     agent: Agent,
     home: &str,
 ) -> Result<(), Envelope> {
-    // 1. install (hang-guarded).
-    progress(sink, &command::install_step(agent));
-    match ops.run_installer(&command::install_cmd(agent, home), INSTALL_TIMEOUT) {
-        InstallOutcome::Completed { exit_code: 0, .. } => {}
-        InstallOutcome::Completed { exit_code, output } => {
-            return Err(command::install_failed_envelope(agent, exit_code)
-                .with_cause(&tail(&output, CAUSE_TAIL)));
+    // 1. resolve: an agent the user (or an earlier run) already installed is used
+    //    as-is. Cowork never upgrades an agent it did not install.
+    progress(sink, &command::resolve_step(agent));
+    let mut bin = resolve_bin(ops, agent);
+
+    // 2. install (hang-guarded) only when it is absent.
+    if bin.is_none() {
+        progress(sink, &command::install_step(agent));
+        match ops.run_installer(&command::install_cmd(agent), INSTALL_TIMEOUT) {
+            InstallOutcome::Completed { exit_code: 0, .. } => {}
+            InstallOutcome::Completed { exit_code, output } => {
+                return Err(command::install_failed_envelope(agent, exit_code)
+                    .with_cause(&tail(&output, CAUSE_TAIL)));
+            }
+            InstallOutcome::TimedOut => return Err(command::installer_hang_envelope(agent)),
+            InstallOutcome::LaunchFailed { detail } => {
+                return Err(command::install_failed_envelope(agent, -1).with_cause(&detail));
+            }
         }
-        InstallOutcome::TimedOut => return Err(command::installer_hang_envelope(agent)),
-        InstallOutcome::LaunchFailed { detail } => {
-            return Err(command::install_failed_envelope(agent, -1).with_cause(&detail));
-        }
+        bin = resolve_bin(ops, agent);
     }
 
-    // 2. verify the installed binary.
+    // 3. verify whatever we ended up with.
     progress(sink, &command::verify_step(agent));
-    let bin = command::bin_path(agent, home);
-    if !ops.path_exists(&bin) {
-        return Err(command::binary_not_found_envelope(agent, &bin));
-    }
-    match ops.run_check(&command::verify_cmd(agent, home)) {
-        InstallOutcome::Completed { exit_code: 0, .. } => {}
+    let Some(bin) = bin else {
+        return Err(command::binary_not_found_envelope(
+            agent,
+            &command::bin_path(agent, home),
+        ));
+    };
+    match ops.run_check(&command::verify_cmd(&bin)) {
+        InstallOutcome::Completed { exit_code: 0, .. } => Ok(()),
         InstallOutcome::Completed { .. } | InstallOutcome::TimedOut => {
-            return Err(command::integrity_check_failed_envelope(agent));
+            Err(command::integrity_check_failed_envelope(agent))
         }
-        InstallOutcome::LaunchFailed { .. } => {
-            return Err(command::binary_not_found_envelope(agent, &bin));
-        }
-    }
-
-    // 3. route credentials into ~/.cowork/creds/<agent>.
-    progress(sink, &command::creds_step(agent));
-    route_creds(ops, agent, home)
-}
-
-fn route_creds(ops: &mut dyn AgentOps, agent: Agent, home: &str) -> Result<(), Envelope> {
-    let dir = command::creds_dir(agent, home);
-    if let Err(e) = ops.create_dir_all(&dir) {
-        return Err(command::internal_unknown_envelope(&format!(
-            "create {dir}: {e}"
-        )));
-    }
-
-    match command::creds_export_line(agent, home) {
-        // env-redirect agents (claude, codex): idempotent shellrc export.
-        Some(line) => ensure_shellrc_line(ops, home, &line),
-        // no env override (antigravity): symlink its config dir into the creds dir.
-        None => {
-            let parent = command::antigravity_link_parent(home);
-            if let Err(e) = ops.create_dir_all(&parent) {
-                return Err(command::internal_unknown_envelope(&format!(
-                    "create {parent}: {e}"
-                )));
-            }
-            let link = command::antigravity_link_path(home);
-            if let Err(e) = ops.symlink(&dir, &link) {
-                return Err(command::internal_unknown_envelope(&format!(
-                    "symlink {link}: {e}"
-                )));
-            }
-            Ok(())
-        }
+        InstallOutcome::LaunchFailed { .. } => Err(command::binary_not_found_envelope(agent, &bin)),
     }
 }
 
-/// Append `line` to `~/.bashrc` if an identical (trimmed) line is not present.
-fn ensure_shellrc_line(ops: &mut dyn AgentOps, home: &str, line: &str) -> Result<(), Envelope> {
-    let file = format!("{home}/.bashrc");
-    let existing = ops.read_to_string(&file).unwrap_or_default();
-    if existing.lines().any(|l| l.trim() == line) {
-        return Ok(());
+/// `None` when the agent is not on a login shell's PATH. A failed probe (launch
+/// failure, timeout, nonzero exit) is "not installed", not an error: the install
+/// step that follows is the real test.
+fn resolve_bin(ops: &mut dyn AgentOps, agent: Agent) -> Option<String> {
+    match ops.run_check(&command::resolve_cmd(agent)) {
+        InstallOutcome::Completed {
+            exit_code: 0,
+            output,
+        } => command::parse_resolved_bin(&output),
+        _ => None,
     }
-    if let Err(e) = ops.append_line(&file, line) {
-        return Err(command::internal_unknown_envelope(&format!(
-            "write {file}: {e}"
-        )));
-    }
-    Ok(())
 }
 
 fn progress(sink: &mut dyn ProgressSink, step: &str) {
@@ -180,7 +151,7 @@ fn tail(s: &str, n: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::{HashMap, HashSet};
+    use std::collections::{HashMap, VecDeque};
 
     use crate::cmd::Cmd;
 
@@ -201,7 +172,6 @@ mod tests {
                     ("error".to_string(), format!("{:?}", envelope.code))
                 }
                 Message::Done { .. } => ("done".to_string(), String::new()),
-                Message::AuthStatus { .. } => ("auth_status".to_string(), String::new()),
                 Message::SessionUuid { .. } => ("session_uuid".to_string(), String::new()),
             };
             self.events.push(pair);
@@ -209,18 +179,9 @@ mod tests {
     }
 
     struct MockAgentOps {
-        installed: HashSet<String>,
         install_fail: HashMap<String, i32>,
-        install_timeout: HashSet<String>,
-        verify_fail: HashSet<String>,
-        verify_launch_fail: HashSet<String>,
-        missing_binary: HashSet<String>,
-        dir_fail: bool,
-        symlink_fail: bool,
-        append_fail: bool,
-        files: HashMap<String, String>,
-        dirs: Vec<String>,
-        symlinks: Vec<(String, String)>,
+        install_timeout: Vec<String>,
+        checks_by_program: HashMap<String, VecDeque<InstallOutcome>>,
         installer_runs: Vec<Cmd>,
         checks: Vec<Cmd>,
     }
@@ -228,21 +189,62 @@ mod tests {
     impl MockAgentOps {
         fn new() -> Self {
             Self {
-                installed: HashSet::new(),
                 install_fail: HashMap::new(),
-                install_timeout: HashSet::new(),
-                verify_fail: HashSet::new(),
-                verify_launch_fail: HashSet::new(),
-                missing_binary: HashSet::new(),
-                dir_fail: false,
-                symlink_fail: false,
-                append_fail: false,
-                files: HashMap::new(),
-                dirs: Vec::new(),
-                symlinks: Vec::new(),
+                install_timeout: Vec::new(),
+                checks_by_program: HashMap::new(),
                 installer_runs: Vec::new(),
                 checks: Vec::new(),
             }
+        }
+
+        fn queue_check(&mut self, program: &str, outcome: InstallOutcome) {
+            self.checks_by_program
+                .entry(program.to_string())
+                .or_default()
+                .push_back(outcome);
+        }
+
+        fn queue_resolve(&mut self, path: Option<&str>) {
+            let outcome = match path {
+                Some(path) => InstallOutcome::Completed {
+                    exit_code: 0,
+                    output: format!("{path}\n"),
+                },
+                None => InstallOutcome::Completed {
+                    exit_code: 1,
+                    output: String::new(),
+                },
+            };
+            self.queue_check("bash", outcome);
+        }
+
+        fn queue_verify_ok(&mut self, bin: &str) {
+            self.queue_check(
+                bin,
+                InstallOutcome::Completed {
+                    exit_code: 0,
+                    output: String::new(),
+                },
+            );
+        }
+
+        fn queue_verify_nonzero(&mut self, bin: &str) {
+            self.queue_check(
+                bin,
+                InstallOutcome::Completed {
+                    exit_code: 1,
+                    output: "bad version".to_string(),
+                },
+            );
+        }
+
+        fn queue_verify_launch_failed(&mut self, bin: &str) {
+            self.queue_check(
+                bin,
+                InstallOutcome::LaunchFailed {
+                    detail: "missing".to_string(),
+                },
+            );
         }
     }
 
@@ -250,7 +252,7 @@ mod tests {
         fn run_installer(&mut self, cmd: &Cmd, _timeout: Duration) -> InstallOutcome {
             self.installer_runs.push(cmd.clone());
             let agent = agent_from_install(cmd);
-            if self.install_timeout.contains(agent.id()) {
+            if self.install_timeout.iter().any(|id| id == agent.id()) {
                 return InstallOutcome::TimedOut;
             }
             match self.install_fail.get(agent.id()) {
@@ -267,65 +269,13 @@ mod tests {
 
         fn run_check(&mut self, cmd: &Cmd) -> InstallOutcome {
             self.checks.push(cmd.clone());
-            let agent = agent_from_check(cmd);
-            if self.verify_launch_fail.contains(agent.id()) {
-                return InstallOutcome::LaunchFailed {
-                    detail: "missing".to_string(),
-                };
-            }
-            if self.verify_fail.contains(agent.id()) {
-                return InstallOutcome::Completed {
-                    exit_code: 1,
-                    output: "bad version".to_string(),
-                };
-            }
-            InstallOutcome::Completed {
-                exit_code: 0,
-                output: String::new(),
-            }
-        }
-
-        fn path_exists(&self, path: &str) -> bool {
-            for agent in [Agent::Claude, Agent::Codex, Agent::Antigravity] {
-                if path == command::bin_path(agent, "/home/u")
-                    && self.missing_binary.contains(agent.id())
-                {
-                    return false;
-                }
-            }
-            self.installed.contains(path)
-        }
-
-        fn read_to_string(&self, path: &str) -> Option<String> {
-            self.files.get(path).cloned()
-        }
-
-        fn append_line(&mut self, path: &str, line: &str) -> Result<(), String> {
-            if self.append_fail {
-                return Err("append denied".to_string());
-            }
-            let entry = self.files.entry(path.to_string()).or_default();
-            entry.push_str(line);
-            entry.push('\n');
-            Ok(())
-        }
-
-        fn create_dir_all(&mut self, path: &str) -> Result<(), String> {
-            if self.dir_fail {
-                Err("mkdir denied".to_string())
-            } else {
-                self.dirs.push(path.to_string());
-                Ok(())
-            }
-        }
-
-        fn symlink(&mut self, target: &str, link: &str) -> Result<(), String> {
-            if self.symlink_fail {
-                Err("symlink denied".to_string())
-            } else {
-                self.symlinks.push((target.to_string(), link.to_string()));
-                Ok(())
-            }
+            self.checks_by_program
+                .get_mut(&cmd.program)
+                .and_then(VecDeque::pop_front)
+                .unwrap_or(InstallOutcome::Completed {
+                    exit_code: 0,
+                    output: String::new(),
+                })
         }
     }
 
@@ -334,16 +284,6 @@ mod tests {
         if script.contains("claude.ai") {
             Agent::Claude
         } else if script.contains("chatgpt.com/codex") {
-            Agent::Codex
-        } else {
-            Agent::Antigravity
-        }
-    }
-
-    fn agent_from_check(cmd: &Cmd) -> Agent {
-        if cmd.program.ends_with("/claude") {
-            Agent::Claude
-        } else if cmd.program.ends_with("/codex") {
             Agent::Codex
         } else {
             Agent::Antigravity
@@ -365,10 +305,6 @@ mod tests {
             .collect()
     }
 
-    fn shellrc() -> String {
-        "/home/u/.bashrc".to_string()
-    }
-
     fn assert_failed_with(out: AgentInstallOutcome, expected: cowork_errors::Code) {
         match out {
             AgentInstallOutcome::Failed(env) => assert_eq!(env.code, expected),
@@ -379,8 +315,9 @@ mod tests {
     #[test]
     fn happy_path_single_agent_emits_hello_progress_done() {
         let mut ops = MockAgentOps::new();
-        ops.installed
-            .insert(command::bin_path(Agent::Claude, "/home/u"));
+        ops.queue_resolve(None);
+        ops.queue_resolve(Some("/home/u/.local/bin/claude"));
+        ops.queue_verify_ok("/home/u/.local/bin/claude");
         let mut sink = CollectingSink::default();
         let out = run_agent_install(&mut ops, &mut sink, &config(vec![Agent::Claude]));
         assert!(matches!(out, AgentInstallOutcome::Done));
@@ -389,71 +326,20 @@ mod tests {
         assert_eq!(sink.events.last().map(|(t, _)| t.as_str()), Some("done"));
         assert_eq!(
             steps(&sink),
-            vec!["install-claude", "verify-claude", "creds-claude"]
+            vec!["resolve-claude", "install-claude", "verify-claude"]
         );
         assert_eq!(ops.installer_runs.len(), 1);
-        assert!(
-            ops.dirs
-                .contains(&command::creds_dir(Agent::Claude, "/home/u"))
-        );
-        assert!(
-            ops.files
-                .get(&shellrc())
-                .unwrap()
-                .contains(r#"export CLAUDE_CONFIG_DIR="/home/u/.cowork/creds/claude""#)
-        );
-    }
-
-    #[test]
-    fn happy_path_codex_sets_codex_home_export() {
-        let mut ops = MockAgentOps::new();
-        ops.installed
-            .insert(command::bin_path(Agent::Codex, "/home/u"));
-        let mut sink = CollectingSink::default();
-        let out = run_agent_install(&mut ops, &mut sink, &config(vec![Agent::Codex]));
-        assert!(matches!(out, AgentInstallOutcome::Done));
-        assert!(
-            ops.files
-                .get(&shellrc())
-                .unwrap()
-                .contains(r#"export CODEX_HOME="/home/u/.cowork/creds/codex""#)
-        );
-    }
-
-    #[test]
-    fn antigravity_creates_symlink_not_export() {
-        let mut ops = MockAgentOps::new();
-        ops.installed
-            .insert(command::bin_path(Agent::Antigravity, "/home/u"));
-        let mut sink = CollectingSink::default();
-        let out = run_agent_install(&mut ops, &mut sink, &config(vec![Agent::Antigravity]));
-        assert!(matches!(out, AgentInstallOutcome::Done));
-        assert_eq!(
-            ops.symlinks,
-            vec![(
-                command::creds_dir(Agent::Antigravity, "/home/u"),
-                command::antigravity_link_path("/home/u")
-            )]
-        );
-        assert!(
-            ops.dirs
-                .contains(&command::antigravity_link_parent("/home/u"))
-        );
-        assert!(
-            !ops.files
-                .get(&shellrc())
-                .cloned()
-                .unwrap_or_default()
-                .contains("export")
-        );
     }
 
     #[test]
     fn multi_agent_runs_all_in_order() {
         let mut ops = MockAgentOps::new();
-        for agent in [Agent::Claude, Agent::Codex, Agent::Antigravity] {
-            ops.installed.insert(command::bin_path(agent, "/home/u"));
-        }
+        ops.queue_resolve(Some("/home/u/.local/bin/claude"));
+        ops.queue_resolve(Some("/home/u/.local/bin/codex"));
+        ops.queue_resolve(Some("/home/u/.local/bin/agy"));
+        ops.queue_verify_ok("/home/u/.local/bin/claude");
+        ops.queue_verify_ok("/home/u/.local/bin/codex");
+        ops.queue_verify_ok("/home/u/.local/bin/agy");
         let mut sink = CollectingSink::default();
         let out = run_agent_install(
             &mut ops,
@@ -464,15 +350,12 @@ mod tests {
         assert_eq!(
             steps(&sink),
             vec![
-                "install-claude",
+                "resolve-claude",
                 "verify-claude",
-                "creds-claude",
-                "install-codex",
+                "resolve-codex",
                 "verify-codex",
-                "creds-codex",
-                "install-antigravity",
+                "resolve-antigravity",
                 "verify-antigravity",
-                "creds-antigravity",
             ]
         );
     }
@@ -480,18 +363,20 @@ mod tests {
     #[test]
     fn install_nonzero_maps_to_install_failed() {
         let mut ops = MockAgentOps::new();
+        ops.queue_resolve(None);
         ops.install_fail.insert("codex".to_string(), 1);
         let mut sink = CollectingSink::default();
         let out = run_agent_install(&mut ops, &mut sink, &config(vec![Agent::Codex]));
         assert_failed_with(out, cowork_errors::Code::AgentInstallFailed);
-        assert_eq!(steps(&sink), vec!["install-codex"]);
-        assert!(ops.checks.is_empty());
+        assert_eq!(steps(&sink), vec!["resolve-codex", "install-codex"]);
+        assert_eq!(ops.checks.len(), 1);
     }
 
     #[test]
     fn install_timeout_maps_to_installer_hang() {
         let mut ops = MockAgentOps::new();
-        ops.install_timeout.insert("claude".to_string());
+        ops.queue_resolve(None);
+        ops.install_timeout.push("claude".to_string());
         let mut sink = CollectingSink::default();
         let out = run_agent_install(&mut ops, &mut sink, &config(vec![Agent::Claude]));
         assert_failed_with(out, cowork_errors::Code::AgentInstallerHang);
@@ -500,21 +385,31 @@ mod tests {
     #[test]
     fn missing_binary_maps_to_binary_not_found() {
         let mut ops = MockAgentOps::new();
-        ops.installed
-            .insert(command::bin_path(Agent::Claude, "/home/u"));
-        ops.missing_binary.insert("claude".to_string());
+        ops.queue_resolve(None);
+        ops.queue_resolve(None);
         let mut sink = CollectingSink::default();
         let out = run_agent_install(&mut ops, &mut sink, &config(vec![Agent::Claude]));
-        assert_failed_with(out, cowork_errors::Code::AgentBinaryNotFound);
-        assert_eq!(steps(&sink), vec!["install-claude", "verify-claude"]);
+        match out {
+            AgentInstallOutcome::Failed(env) => {
+                assert_eq!(env.code, cowork_errors::Code::AgentBinaryNotFound);
+                assert_eq!(
+                    env.context.get("expectedPath").map(String::as_str),
+                    Some("/home/u/.local/bin/claude")
+                );
+            }
+            AgentInstallOutcome::Done => panic!("expected Failed, got Done"),
+        }
+        assert_eq!(
+            steps(&sink),
+            vec!["resolve-claude", "install-claude", "verify-claude"]
+        );
     }
 
     #[test]
     fn version_nonzero_maps_to_integrity_check_failed() {
         let mut ops = MockAgentOps::new();
-        ops.installed
-            .insert(command::bin_path(Agent::Claude, "/home/u"));
-        ops.verify_fail.insert("claude".to_string());
+        ops.queue_resolve(Some("/home/u/.local/bin/claude"));
+        ops.queue_verify_nonzero("/home/u/.local/bin/claude");
         let mut sink = CollectingSink::default();
         let out = run_agent_install(&mut ops, &mut sink, &config(vec![Agent::Claude]));
         assert_failed_with(out, cowork_errors::Code::AgentIntegrityCheckFailed);
@@ -523,46 +418,46 @@ mod tests {
     #[test]
     fn verify_launch_fail_maps_to_binary_not_found() {
         let mut ops = MockAgentOps::new();
-        ops.installed
-            .insert(command::bin_path(Agent::Claude, "/home/u"));
-        ops.verify_launch_fail.insert("claude".to_string());
+        ops.queue_resolve(Some("/home/u/.local/bin/claude"));
+        ops.queue_verify_launch_failed("/home/u/.local/bin/claude");
         let mut sink = CollectingSink::default();
         let out = run_agent_install(&mut ops, &mut sink, &config(vec![Agent::Claude]));
         assert_failed_with(out, cowork_errors::Code::AgentBinaryNotFound);
     }
 
     #[test]
-    fn creds_dir_failure_maps_to_internal_unknown() {
+    fn already_resolved_agent_skips_installer_and_verifies_resolved_path() {
         let mut ops = MockAgentOps::new();
-        ops.installed
-            .insert(command::bin_path(Agent::Claude, "/home/u"));
-        ops.dir_fail = true;
+        ops.queue_resolve(Some("/opt/bin/claude"));
+        ops.queue_verify_ok("/opt/bin/claude");
         let mut sink = CollectingSink::default();
-        let out = run_agent_install(&mut ops, &mut sink, &config(vec![Agent::Claude]));
-        assert_failed_with(out, cowork_errors::Code::InternalUnknown);
-    }
 
-    #[test]
-    fn symlink_failure_maps_to_internal_unknown() {
-        let mut ops = MockAgentOps::new();
-        ops.installed
-            .insert(command::bin_path(Agent::Antigravity, "/home/u"));
-        ops.symlink_fail = true;
-        let mut sink = CollectingSink::default();
-        let out = run_agent_install(&mut ops, &mut sink, &config(vec![Agent::Antigravity]));
-        assert_failed_with(out, cowork_errors::Code::InternalUnknown);
-    }
-
-    #[test]
-    fn shellrc_export_idempotent() {
-        let mut ops = MockAgentOps::new();
-        ops.installed
-            .insert(command::bin_path(Agent::Claude, "/home/u"));
-        let existing = r#"export CLAUDE_CONFIG_DIR="/home/u/.cowork/creds/claude""#.to_string();
-        ops.files.insert(shellrc(), existing.clone());
-        let mut sink = CollectingSink::default();
         let out = run_agent_install(&mut ops, &mut sink, &config(vec![Agent::Claude]));
+
         assert!(matches!(out, AgentInstallOutcome::Done));
-        assert_eq!(ops.files.get(&shellrc()), Some(&existing));
+        assert!(ops.installer_runs.is_empty());
+        assert_eq!(steps(&sink), vec!["resolve-claude", "verify-claude"]);
+        assert_eq!(ops.checks.len(), 2);
+        assert_eq!(ops.checks[1].program, "/opt/bin/claude");
+    }
+
+    #[test]
+    fn unresolved_agent_installs_then_verifies_second_resolved_path() {
+        let mut ops = MockAgentOps::new();
+        ops.queue_resolve(None);
+        ops.queue_resolve(Some("/home/u/.local/bin/codex"));
+        ops.queue_verify_ok("/home/u/.local/bin/codex");
+        let mut sink = CollectingSink::default();
+
+        let out = run_agent_install(&mut ops, &mut sink, &config(vec![Agent::Codex]));
+
+        assert!(matches!(out, AgentInstallOutcome::Done));
+        assert_eq!(ops.installer_runs.len(), 1);
+        assert_eq!(
+            steps(&sink),
+            vec!["resolve-codex", "install-codex", "verify-codex"]
+        );
+        assert_eq!(ops.checks.len(), 3);
+        assert_eq!(ops.checks[2].program, "/home/u/.local/bin/codex");
     }
 }

@@ -1,11 +1,11 @@
-//! `#[cfg(windows)]` guest-CLI injection + run: copy the binary into the distro
-//! over the `\\wsl.localhost` share, set its executable bit, then spawn it via
+//! `#[cfg(windows)]` guest-CLI injection + run: write the binary into the distro
+//! as root over `wsl.exe` stdin, set its executable bit, then spawn it via
 //! `wsl.exe` and stream its JSON-lines stdout through the host parser. Not
 //! compiled on Linux/CI-ubuntu; verified by the windows-gnu cross-check, the
 //! windows-latest runner, and the WP10 e2e gate. All decision logic it relies on
 //! is the pure, unit-tested `provision/inject.rs`.
 
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
 
@@ -16,20 +16,56 @@ use crate::protocol::{HostEvent, StreamParser};
 
 use super::inject::{
     RunOutcome, chmod_args, classify_run, cli_inject_failed_envelope, cli_launch_failed_envelope,
-    firstboot_setup_args, launch_args, terminate_args, unc_inject_path,
+    firstboot_setup_args, launch_args, needs_inject, terminate_args, unc_inject_path, write_args,
 };
 use super::user_create_failed_envelope;
 
 /// Inject the host-side guest binary at `src_binary` into the `Cowork` distro:
-/// copy it to `\\wsl.localhost\Cowork\usr\local\bin\cowork`, then `chmod +x` it
-/// inside the distro (the copy does not carry the executable bit).
+/// stream it to `/usr/local/bin/cowork` as root, then `chmod +x` it inside the
+/// distro (the piped write does not carry the executable bit).
 pub fn inject_guest(src_binary: &str) -> Result<(), Envelope> {
-    let target = unc_inject_path();
-    if let Err(e) = std::fs::copy(src_binary, &target) {
+    let mut child = Command::new("wsl.exe")
+        .creation_flags(CREATE_NO_WINDOW)
+        .args(write_args())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| cli_inject_failed_envelope(&format!("launch write: {e}")))?;
+
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| cli_inject_failed_envelope("launch write: missing stdin pipe"))?;
+    let mut src = std::fs::File::open(src_binary)
+        .map_err(|e| cli_inject_failed_envelope(&format!("read shipped {src_binary}: {e}")))?;
+    if let Err(e) = std::io::copy(&mut src, &mut stdin) {
+        drop(stdin);
+        let _ = child.wait();
         return Err(cli_inject_failed_envelope(&format!(
-            "copy {src_binary} -> {target}: {e}"
+            "write shipped {src_binary} -> root stdin: {e}"
         )));
     }
+    if let Err(e) = stdin.flush() {
+        drop(stdin);
+        let _ = child.wait();
+        return Err(cli_inject_failed_envelope(&format!(
+            "flush shipped {src_binary} -> root stdin: {e}"
+        )));
+    }
+    drop(stdin);
+
+    match child.wait() {
+        Ok(status) if status.success() => {}
+        Ok(status) => {
+            return Err(cli_inject_failed_envelope(&format!(
+                "write exited {}",
+                status.code().unwrap_or(-1)
+            )));
+        }
+        Err(e) => return Err(cli_inject_failed_envelope(&format!("wait write: {e}"))),
+    }
+
     match Command::new("wsl.exe")
         .creation_flags(CREATE_NO_WINDOW)
         .args(chmod_args())
@@ -42,6 +78,22 @@ pub fn inject_guest(src_binary: &str) -> Result<(), Envelope> {
         ))),
         Err(e) => Err(cli_inject_failed_envelope(&format!("launch chmod: {e}"))),
     }
+}
+
+/// Shell-boot guest sync: re-inject the guest CLI when the installed binary
+/// differs from the shipped one. This is how rebuilt app bytes reach an
+/// already-provisioned distro, and how a missing/corrupt installed guest
+/// self-heals. Returns whether an injection ran. An unreadable installed
+/// binary counts as stale; a failed read of the shipped binary is a real error.
+pub fn sync_guest(src_binary: &str) -> Result<bool, Envelope> {
+    let shipped = std::fs::read(src_binary)
+        .map_err(|e| cli_inject_failed_envelope(&format!("read shipped {src_binary}: {e}")))?;
+    let installed = std::fs::read(unc_inject_path()).ok();
+    if !needs_inject(&shipped, installed.as_deref()) {
+        return Ok(false);
+    }
+    inject_guest(src_binary)?;
+    Ok(true)
 }
 
 /// Create the non-root firstboot user, set it as the distro default, and

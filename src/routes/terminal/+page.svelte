@@ -1,9 +1,11 @@
 <script lang="ts">
 	import Terminal from '$lib/components/Terminal.svelte';
+
+	const sessionId = crypto.randomUUID();
 </script>
 
 <div class="terminal-page">
-	<Terminal />
+	<Terminal {sessionId} />
 </div>
 
 <style>

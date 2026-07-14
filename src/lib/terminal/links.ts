@@ -30,6 +30,36 @@ export function stripAnsi(text: string): string {
 	return text.replace(ANSI, '');
 }
 
+// A non-whitespace URL run. The rejoin pass uses this to inspect the text on
+// either side of a hard line break and only delete the break when it is clearly
+// inside an http(s) query string rather than between ordinary output lines.
+const URL_RUN_RE = /https?:\/\/\S*$/;
+
+/** Rejoin an application-inserted line break that falls inside a URL query
+ * string. The join is structural: the left side must already be a URL run with
+ * `?`, and the right side must look like more query parameters (no leading
+ * whitespace, contains `=`). Applied repeatedly so URLs split across multiple
+ * hard breaks are fully reassembled. */
+export function joinWrappedUrls(text: string): string {
+	let current = text;
+	for (;;) {
+		let changed = false;
+		current = current.replace(/\r?\n/g, (breakText, offset, source) => {
+			const before = source.slice(0, offset);
+			const left = before.match(URL_RUN_RE)?.[0];
+			if (!left || !left.includes('?')) return breakText;
+
+			const after = source.slice(offset + breakText.length);
+			const right = after.match(/^\S+/)?.[0];
+			if (!right || !right.includes('=')) return breakText;
+
+			changed = true;
+			return '';
+		});
+		if (!changed) return current;
+	}
+}
+
 /** Whether a URL looks like an OAuth / sign-in authorization URL, rather than an
  * incidental link in terminal output (the Ubuntu MOTD, docs links, etc.). Keyed
  * on standard OAuth 2.0 authorize/device markers, not on a specific agent's
@@ -84,7 +114,7 @@ export function createUrlScanner(maxTail = 8192): UrlScanner {
 	return {
 		push(text: string): string | null {
 			raw = (raw + text).slice(-maxTail);
-			const url = detectLatestUrl(stripAnsi(raw), isLoginUrl);
+			const url = detectLatestUrl(joinWrappedUrls(stripAnsi(raw)), isLoginUrl);
 			if (url && url !== lastEmitted) {
 				lastEmitted = url;
 				return url;

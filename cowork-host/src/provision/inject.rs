@@ -1,12 +1,12 @@
 //! Guest-CLI injection + run-result classification (WP5③). Pure command/path
 //! construction, failure→envelope mapping, and the rule that turns a guest's
 //! JSON-lines stream + process exit code into one [`RunOutcome`]. The
-//! `#[cfg(windows)]` side (UNC file copy, `wsl.exe` spawn, line streaming) lives
-//! in `windows_inject`; this module is fully unit-tested off-Windows.
+//! `#[cfg(windows)]` side (`wsl.exe` spawn, root stdin write, line streaming)
+//! lives in `windows_inject`; this module is fully unit-tested off-Windows.
 //!
 //! The guest binary's *provenance* (cross-compiled `cowork` for the distro's
 //! arch, embedded in or downloaded by the host) is deliberately out of scope
-//! here: injection takes a host-side source path and copies it in. That keeps
+//! here: injection takes a host-side source path and writes it into the distro. That keeps
 //! the mechanism independent of the (still-open) build/delivery decision.
 
 use cowork_errors::{Code, Envelope, Stage};
@@ -20,16 +20,31 @@ use super::{DISTRO_NAME, WSL_USER};
 pub const GUEST_BIN_PATH: &str = "/usr/local/bin/cowork";
 
 /// The Windows UNC path that maps to [`GUEST_BIN_PATH`] inside the `Cowork`
-/// distro. `\\wsl.localhost\<distro>\...` is the modern share (WSL ≥ 2.4.4,
-/// which WP4 guarantees). Built from [`DISTRO_NAME`] so the distro name stays
-/// single-source.
+/// distro for host-side reads (for example the stale-byte compare in
+/// `sync_guest`). `\\wsl.localhost\<distro>\...` is the modern share (WSL ≥
+/// 2.4.4, which WP4 guarantees). Built from [`DISTRO_NAME`] so the distro name
+/// stays single-source.
 pub fn unc_inject_path() -> String {
     format!(r"\\wsl.localhost\{DISTRO_NAME}\usr\local\bin\cowork")
 }
 
-/// `wsl -d Cowork -u root -- chmod +x /usr/local/bin/cowork`. A UNC file copy
-/// does not carry the executable bit, so it is set inside the distro. `-u root`
-/// because injection runs before any non-root firstboot user exists.
+/// `wsl -d Cowork -u root -- bash -c 'cat > /usr/local/bin/cowork'` — write the
+/// guest CLI bytes into the distro as root via stdin.
+pub fn write_args() -> Vec<String> {
+    vec![
+        "-d".to_string(),
+        DISTRO_NAME.to_string(),
+        "-u".to_string(),
+        "root".to_string(),
+        "--".to_string(),
+        "bash".to_string(),
+        "-c".to_string(),
+        format!("cat > {GUEST_BIN_PATH}"),
+    ]
+}
+
+/// `wsl -d Cowork -u root -- chmod +x /usr/local/bin/cowork`. A piped write
+/// does not carry the executable bit, so it is set inside the distro.
 pub fn chmod_args() -> Vec<String> {
     vec![
         "-d".to_string(),
@@ -41,6 +56,12 @@ pub fn chmod_args() -> Vec<String> {
         "+x".to_string(),
         GUEST_BIN_PATH.to_string(),
     ]
+}
+
+/// Stale-guest check: re-inject unless the installed guest byte-matches the
+/// shipped one. A missing/unreadable installed binary counts as stale.
+pub fn needs_inject(shipped: &[u8], installed: Option<&[u8]>) -> bool {
+    installed != Some(shipped)
 }
 
 /// `wsl -d Cowork -- /usr/local/bin/cowork <extra...>` — invoke the injected
@@ -95,7 +116,7 @@ pub fn terminate_args() -> Vec<String> {
     vec!["--terminate".to_string(), DISTRO_NAME.to_string()]
 }
 
-/// `guest.cli_inject_failed` (Internal) — copying the binary in or setting its
+/// `guest.cli_inject_failed` (Internal) — writing the binary in or setting its
 /// executable bit failed.
 pub fn cli_inject_failed_envelope(detail: &str) -> Envelope {
     Envelope::new(Code::GuestCliInjectFailed, Stage::Provision).with_context("detail", detail)
@@ -183,7 +204,7 @@ pub fn classify_run(events: &[HostEvent], exit_code: i32, default_stage: Stage) 
         .find_map(|ev| match ev {
             HostEvent::Progress { stage, .. } => Some(*stage),
             HostEvent::Done { stage } => Some(*stage),
-            HostEvent::AuthStatus { .. } | HostEvent::SessionUuid { .. } => None,
+            HostEvent::SessionUuid { .. } => None,
             HostEvent::GuestError(_) | HostEvent::ProtocolError(_) => None,
         })
         .unwrap_or(default_stage);
@@ -238,6 +259,38 @@ mod tests {
                 "/usr/local/bin/cowork".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn write_args_stream_guest_bytes_to_root_owned_path() {
+        assert_eq!(
+            write_args(),
+            vec![
+                "-d".to_string(),
+                "Cowork".to_string(),
+                "-u".to_string(),
+                "root".to_string(),
+                "--".to_string(),
+                "bash".to_string(),
+                "-c".to_string(),
+                "cat > /usr/local/bin/cowork".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn needs_inject_is_false_for_identical_bytes() {
+        assert!(!needs_inject(b"shipped", Some(b"shipped")));
+    }
+
+    #[test]
+    fn needs_inject_is_true_for_different_bytes() {
+        assert!(needs_inject(b"shipped", Some(b"installed")));
+    }
+
+    #[test]
+    fn needs_inject_is_true_for_missing_installed_binary() {
+        assert!(needs_inject(b"shipped", None));
     }
 
     #[test]

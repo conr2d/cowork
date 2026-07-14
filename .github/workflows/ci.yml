@@ -47,6 +47,14 @@ jobs:
       # and unit-tested here. The cfg(windows) probe is compiled on the host job.
       - run: cargo clippy -p cowork-host --all-targets -- -D warnings
       - run: cargo test -p cowork-host
+      # A Linux clippy/test of cowork-host never type-checks its cfg(windows)
+      # modules, so a rename or deletion elsewhere in the crate can leave them
+      # dangling and green — that shipped once (a deleted `auth` module still
+      # imported by `session::windows_session`), caught only by the windows job.
+      # `cargo check` for the windows target does not link, so it needs no mingw
+      # and costs seconds.
+      - run: rustup target add x86_64-pc-windows-gnu
+      - run: cargo check -p cowork-host --target x86_64-pc-windows-gnu
 
   # Conformance gates (the unit-seal gate). WP0: host/guest separation.
   # WP2 adds the errors.json single-source + 3-locale parity check here.
@@ -115,24 +123,26 @@ jobs:
       # shared runner egress IP and has no token support — an intermittent failure of
       # the external service, not our code. claude's installer pulls from
       # downloads.claude.ai (Anthropic CDN, no such rate limit), so it exercises the
-      # same install -> verify -> creds-route machinery reliably. codex's own install is
+      # same install -> verify machinery reliably. codex's own install is
       # validated at the Hyper-V full gate on a real user IP.
       - name: Bootstrap + install claude (no login)
         run: |
           sudo -u cowork -i cowork bootstrap
           sudo -u cowork -i cowork agent-install --agent claude
-      # Assert by absolute path (a non-interactive shell returns early from the
-      # default ~/.bashrc, so brew/mise are not on PATH here — that is expected;
-      # the real terminal is interactive).
+          # Re-run must take the resolve-and-skip path: an agent already present is not reinstalled.
+          sudo -u cowork -i cowork agent-install --agent claude
+      # Toolchain activation lives in ~/.profile, so a login shell — interactive
+      # or not — has brew and mise on PATH.
       - name: Assert the happy path
         run: |
           sudo -u cowork -i bash -c '
             set -euo pipefail
             test -d "$HOME/workspaces/default"
-            test -x /home/linuxbrew/.linuxbrew/bin/brew
-            test -x "$HOME/.local/bin/mise"
+            command -v brew
+            command -v mise
             test -x "$HOME/.local/bin/claude"
-            grep -q CLAUDE_CONFIG_DIR "$HOME/.bashrc"
+            # credentials are not routed; nothing is created under ~/.cowork
+            test ! -e "$HOME/.cowork"
           '
 
   # WP10 ② wsl-integration (non-required follow-up): exercise the REAL WSL2 path on
@@ -218,20 +228,24 @@ jobs:
         shell: pwsh
         run: |
           # bootstrap (brew/mise/locales/workspace) is verified here on the real WSL2
-          # kernel. Absolute paths: a non-interactive shell returns early from ~/.bashrc,
-          # so brew/mise are not on PATH — that is expected.
-          wsl -d Cowork -u cowork -- bash -c 'set -euo pipefail; test -d "$HOME/workspaces/default" && test -x /home/linuxbrew/.linuxbrew/bin/brew && test -x "$HOME/.local/bin/mise"'
-      - name: Install an agent on real WSL (claude) + assert creds routing
+          # kernel. Toolchain activation lives in ~/.profile, so a login shell —
+          # interactive or not — has brew and mise on PATH. A bare bash -c would
+          # read no startup file at all.
+          wsl -d Cowork -u cowork -- bash -lc 'set -euo pipefail; test -d "$HOME/workspaces/default" && command -v brew && command -v mise'
+      - name: Install an agent on real WSL (claude)
         shell: pwsh
         run: |
-          # Exercise the real agent-install machinery (install -> verify -> creds route)
+          # Exercise the real agent-install machinery (install -> verify)
           # on the real WSL2 kernel. Use claude: its installer pulls from
           # downloads.claude.ai (Anthropic CDN), so unlike codex it does not depend on
           # unauthenticated api.github.com and is not rate-limited on the shared runner
           # IP. Bounded by a Linux-side timeout with an EOF stdin, as above.
           cmd /c "wsl -d Cowork -u cowork -- timeout 300 /usr/local/bin/cowork agent-install --agent claude < nul"
           if ($LASTEXITCODE -ne 0) { throw "claude install failed (exit $LASTEXITCODE; 124 = timed out)" }
-          wsl -d Cowork -u cowork -- bash -c 'set -euo pipefail; test -x "$HOME/.local/bin/claude" && grep -q CLAUDE_CONFIG_DIR "$HOME/.bashrc"'
+          # Re-run must take the resolve-and-skip path: an agent already present is not reinstalled.
+          cmd /c "wsl -d Cowork -u cowork -- timeout 300 /usr/local/bin/cowork agent-install --agent claude < nul"
+          if ($LASTEXITCODE -ne 0) { throw "claude reinstall skip failed (exit $LASTEXITCODE; 124 = timed out)" }
+          wsl -d Cowork -u cowork -- bash -lc 'set -euo pipefail; command -v claude && test ! -e "$HOME/.cowork"'
       # NOTE: codex agent install is deliberately NOT exercised in CI. Its installer
       # resolves versions and asset URLs via api.github.com, which is unauthenticated
       # (60 req/h/IP) and rate-limited to HTTP 403 on the shared GitHub-Actions runner

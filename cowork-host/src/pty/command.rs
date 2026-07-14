@@ -36,26 +36,54 @@ pub fn locale_to_lang(locale: &str) -> &'static str {
 /// `workspace`, with the terminal tuning env set *inside* WSL via `env` (this is
 /// deterministic and avoids WSLENV forwarding subtleties). `LANG`/`LC_ALL` come
 /// from `locale` so CJK cell width and agent output match the UI language.
-pub fn terminal_launch(distro: &str, workspace: &str, locale: &str) -> PtyCommand {
+///
+/// With `autorun`, the login shell execs the agent in place so the PTY process
+/// is the agent itself and no command is ever typed into the terminal.
+pub fn terminal_launch(
+    distro: &str,
+    workspace: &str,
+    locale: &str,
+    autorun: Option<&str>,
+) -> PtyCommand {
     let lang = locale_to_lang(locale);
+    let mut args = vec![
+        "-d".to_string(),
+        distro.to_string(),
+        "--cd".to_string(),
+        workspace.to_string(),
+        "--".to_string(),
+        "env".to_string(),
+        format!("COLORTERM={COLORTERM}"),
+        format!("TERM={TERM}"),
+        format!("TERM_PROGRAM={TERM_PROGRAM}"),
+        format!("LANG={lang}"),
+        format!("LC_ALL={lang}"),
+        "bash".to_string(),
+    ];
+    match autorun {
+        Some(autorun) => {
+            args.push("-lic".to_string());
+            args.push(format!("exec {}", shell_escape_command(autorun)));
+        }
+        None => args.push("-li".to_string()),
+    }
     PtyCommand {
         program: "wsl.exe".to_string(),
-        args: vec![
-            "-d".to_string(),
-            distro.to_string(),
-            "--cd".to_string(),
-            workspace.to_string(),
-            "--".to_string(),
-            "env".to_string(),
-            format!("COLORTERM={COLORTERM}"),
-            format!("TERM={TERM}"),
-            format!("TERM_PROGRAM={TERM_PROGRAM}"),
-            format!("LANG={lang}"),
-            format!("LC_ALL={lang}"),
-            "bash".to_string(),
-            "-li".to_string(),
-        ],
+        args,
     }
+}
+
+fn shell_escape_command(command: &str) -> String {
+    command
+        .split_whitespace()
+        .map(shell_escape_word)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn shell_escape_word(word: &str) -> String {
+    let escaped = word.replace('\'', r#"'\''"#);
+    format!("'{escaped}'")
 }
 
 /// `host.pty_spawn_failed` (Internal) — the ConPTY or child could not be created.

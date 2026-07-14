@@ -13,7 +13,7 @@ use cowork_errors::{Code, Envelope, Stage};
 use cowork_host::preflight::{PreflightReport, WindowsProbe, run_preflight};
 use cowork_host::provision::{
     ProvisionOutcome, RunOutcome, WindowsProvisionOps, inject_guest, provision, remove_cowork,
-    run_guest, setup_firstboot_user,
+    run_guest, setup_firstboot_user, sync_guest,
 };
 use cowork_host::setup_marker::{clear_setup_marker, is_setup_complete, mark_setup_complete};
 use cowork_host::wsl::{
@@ -42,7 +42,8 @@ pub enum ProvisionDto {
     AlreadyExists,
 }
 
-/// Persisted wizard resume state, exposed to the frontend on a `--resume` launch.
+/// Persisted wizard resume state, exposed to the frontend when a pending resume
+/// file exists.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResumeDto {
@@ -76,8 +77,8 @@ fn resume_state_path() -> Result<PathBuf, Envelope> {
     Ok(dir)
 }
 
-/// `%LOCALAPPDATA%\Cowork\setup-complete.json` — written when the wizard
-/// finishes; its presence boots the app into the shell.
+/// `%LOCALAPPDATA%\Cowork\setup-complete` — written when the wizard finishes;
+/// its presence boots the app into the shell. Empty: presence is the signal.
 fn setup_marker_path() -> Result<PathBuf, Envelope> {
     let base = std::env::var_os("LOCALAPPDATA").ok_or_else(|| {
         Envelope::new(Code::HostSetupMarkerFailed, Stage::Done)
@@ -85,7 +86,7 @@ fn setup_marker_path() -> Result<PathBuf, Envelope> {
     })?;
     let mut dir = PathBuf::from(base);
     dir.push("Cowork");
-    dir.push("setup-complete.json");
+    dir.push("setup-complete");
     Ok(dir)
 }
 
@@ -208,6 +209,21 @@ pub async fn provision_run() -> Result<ProvisionDto, Envelope> {
     .map_err(join_envelope(Stage::Provision))?
 }
 
+/// Shell-boot guest sync: re-inject the embedded guest CLI when the distro's
+/// installed copy differs. This is how rebuilt app bytes reach an
+/// already-provisioned distro, and how a missing/corrupt guest self-heals.
+/// Called by the shell at boot.
+/// Returns whether an injection ran.
+#[tauri::command]
+pub async fn guest_sync() -> Result<bool, Envelope> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let src = resolve_guest_binary()?;
+        sync_guest(&src)
+    })
+    .await
+    .map_err(join_envelope(Stage::Provision))?
+}
+
 /// Run the guest toolchain bootstrap (WP6), forwarding progress over `on_progress`.
 #[tauri::command]
 pub async fn guest_bootstrap(on_progress: Channel<ProgressEvent>) -> Result<(), Envelope> {
@@ -283,12 +299,6 @@ pub fn setup_is_complete() -> bool {
 #[tauri::command]
 pub fn setup_mark_complete() -> Result<(), Envelope> {
     mark_setup_complete(&setup_marker_path()?)
-}
-
-/// True if the process was relaunched by RunOnce after a reboot (`--resume`).
-#[tauri::command]
-pub fn is_resume_launch() -> bool {
-    std::env::args().any(|a| a == "--resume")
 }
 
 /// Read persisted resume state, if any. `Ok(None)` when there is no pending

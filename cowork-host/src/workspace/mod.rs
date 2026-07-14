@@ -69,11 +69,7 @@ pub struct WorkspaceMeta {
     pub last_used_ms: u64,
     pub default_agent: String,
     pub preset: String,
-    #[serde(default)]
     pub sessions: Vec<SessionMeta>,
-    /// Reserved for v0.3+ provider switching; always None in v0.2.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_provider: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -110,6 +106,8 @@ pub fn create_workspace(
         "create".to_string(),
         "--slug".to_string(),
         slug.clone(),
+        "--preset".to_string(),
+        req.preset.clone(),
     ];
     match ops.run(&extra) {
         RunOutcome::Done { .. } => {}
@@ -128,7 +126,6 @@ pub fn create_workspace(
         default_agent: req.default_agent.clone(),
         preset: req.preset.clone(),
         sessions: vec![],
-        default_provider: None,
     };
     all.push(meta.clone());
     store.save(&all)?;

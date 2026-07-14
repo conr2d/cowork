@@ -11,6 +11,11 @@ describe('createMockHost', () => {
 		expect(report.outcomes).toHaveLength(9);
 	});
 
+	it('returns a fixed app build stamp by default', async () => {
+		const host = createMockHost();
+		await expect(host.appBuild()).resolves.toEqual({ version: '0.1.0', sha: 'abcdef0' });
+	});
+
 	it('streams the default bootstrap steps to onProgress', async () => {
 		const host = createMockHost();
 		const seen: ProgressEvent[] = [];
@@ -31,12 +36,17 @@ describe('createMockHost', () => {
 		await expect(host.wslEnable(['claude'])).rejects.toEqual(envelope);
 	});
 
+	it('reports guest sync as unchanged by default and rejects scripted failures', async () => {
+		const envelope = { code: 'guest.cli_inject_failed', kind: 'Internal', stage: 'provision' };
+		await expect(createMockHost().guestSync()).resolves.toBe(false);
+		const host = createMockHost({ failWith: { guestSync: envelope } });
+		await expect(host.guestSync()).rejects.toEqual(envelope);
+	});
+
 	it('honors a pending resume state', async () => {
 		const host = createMockHost({
-			resumeLaunch: true,
 			resumeState: { stage: 'WslReady', selectedAgents: ['codex'] }
 		});
-		expect(await host.isResumeLaunch()).toBe(true);
 		expect(await host.getResumeState()).toEqual({ stage: 'WslReady', selectedAgents: ['codex'] });
 	});
 
@@ -126,27 +136,16 @@ describe('createMockHost', () => {
 		await expect(host.workspaceOpenFiles('default')).rejects.toEqual(envelope);
 	});
 
-	it('reports valid auth by default', async () => {
-		const host = createMockHost();
-		await expect(host.verifyAgentAuth('claude')).resolves.toBe('Valid');
-	});
-
-	it('honors scripted auth status per agent', async () => {
-		const host = createMockHost({ agentAuth: { codex: 'Missing' } });
-		await expect(host.verifyAgentAuth('codex')).resolves.toBe('Missing');
-		await expect(host.verifyAgentAuth('claude')).resolves.toBe('Valid');
-	});
-
-	it('rejects auth status with injected failure', async () => {
-		const envelope = { code: 'auth.status_probe_failed', kind: 'Internal', stage: 'auth' };
-		const host = createMockHost({ failWith: { verifyAgentAuth: envelope } });
-		await expect(host.verifyAgentAuth('claude')).rejects.toEqual(envelope);
-	});
-
 	it('captures scripted session uuids and returns null by default', async () => {
 		const host = createMockHost({ sessionUuids: { codex: 'u1' } });
 		await expect(host.captureSessionUuid('codex', 'default', 0)).resolves.toBe('u1');
 		await expect(host.captureSessionUuid('antigravity', 'default', 0)).resolves.toBeNull();
+	});
+
+	it('probes scripted session existence and defaults to exists', async () => {
+		const host = createMockHost({ sessionChecks: { claude: false } });
+		await expect(host.sessionCheck('claude', 'u1')).resolves.toBe(false);
+		await expect(host.sessionCheck('codex', 'u2')).resolves.toBe(true);
 	});
 
 	it('syncs agent theme and rejects scripted failures', async () => {

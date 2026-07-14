@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { HostClient } from '$lib/host/client';
 	import * as m from '$lib/paraglide/messages';
-	import type { AgentId } from '$lib/terminal/login';
+	import type { AgentId } from '$lib/terminal/agent';
 	import AgentIcon from './AgentIcon.svelte';
 	import { brand, PRESETS } from './model';
 	import type { Shell } from './store.svelte';

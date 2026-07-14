@@ -32,11 +32,15 @@ embed-guest = []
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# Deliberately enabled in release builds for v0.x field diagnostics; revisit
+# before any public release so devtools is not shipped by default.
+tauri = { version = "2", features = ["devtools"] }
+tauri-plugin-single-instance = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-fs = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }
+uuid = { workspace = true }
 # Host driver logic (PTY session, wsl.exe, preflight, …) lives in cowork-host;
 # src-tauri is the thin Tauri command/event layer over it. cowork-errors gives
 # the structured Envelope returned from commands to the localizing frontend.

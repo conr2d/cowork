@@ -2,10 +2,10 @@
 // `createMockHost` returns a happy-path client; pass overrides to inject specific
 // behaviors (e.g. a failing step, or a pending resume).
 
-import type { AgentId } from '$lib/terminal/login';
+import type { AgentId } from '$lib/terminal/agent';
 import type { HostClient } from './client';
 import type {
-	AgentAuthStatusDto,
+	AppBuildDto,
 	PreflightReport,
 	ProgressEvent,
 	ProvisionDto,
@@ -16,18 +16,18 @@ import type {
 } from './types';
 
 export interface MockHostOptions {
+	build?: AppBuildDto;
 	preflight?: PreflightReport;
 	wslEnable?: WslEnableDto;
 	provision?: ProvisionDto;
 	bootstrapSteps?: ProgressEvent[];
 	agentInstallSteps?: ProgressEvent[];
-	resumeLaunch?: boolean;
 	resumeState?: ResumeDto | null;
 	setupComplete?: boolean;
-	/** Scripted auth-probe results; unspecified agents report 'Valid'. */
-	agentAuth?: Partial<Record<AgentId, AgentAuthStatusDto>>;
 	/** Scripted session UUID capture results; unspecified agents report null. */
 	sessionUuids?: Partial<Record<AgentId, string | null>>;
+	/** Scripted session existence probe results; unspecified agents report true. */
+	sessionChecks?: Partial<Record<AgentId, boolean>>;
 	/** If set, the named method rejects with this value (an Envelope). */
 	failWith?: Partial<Record<keyof HostClient, unknown>>;
 }
@@ -116,9 +116,11 @@ export function createMockHost(options: MockHostOptions = {}): HostClient {
 	};
 
 	return {
+		appBuild: () => rejectIf('appBuild', options.build ?? { version: '0.1.0', sha: 'abcdef0' }),
 		preflightRun: () => rejectIf('preflightRun', options.preflight ?? PASS_REPORT),
 		wslEnable: () => rejectIf('wslEnable', options.wslEnable ?? 'Ready'),
 		provisionRun: () => rejectIf('provisionRun', options.provision ?? 'Ready'),
+		guestSync: () => rejectIf('guestSync', false),
 		guestBootstrap: (onProgress) =>
 			stream(
 				'guestBootstrap',
@@ -135,7 +137,6 @@ export function createMockHost(options: MockHostOptions = {}): HostClient {
 				onProgress
 			),
 		removeCoworkDistro: () => rejectIf('removeCoworkDistro', undefined),
-		isResumeLaunch: () => rejectIf('isResumeLaunch', options.resumeLaunch ?? false),
 		getResumeState: () => rejectIf('getResumeState', options.resumeState ?? null),
 		clearResume: () => rejectIf('clearResume', undefined),
 		setupIsComplete: () => rejectIf('setupIsComplete', setupComplete),
@@ -210,10 +211,10 @@ export function createMockHost(options: MockHostOptions = {}): HostClient {
 				return Promise.reject(workspaceEnvelope('workspace.not_found', 'Internal', { slug }));
 			}
 		},
-		verifyAgentAuth: (agent: AgentId) =>
-			rejectIf('verifyAgentAuth', options.agentAuth?.[agent] ?? 'Valid'),
 		captureSessionUuid: (agent: AgentId) =>
 			rejectIf('captureSessionUuid', options.sessionUuids?.[agent] ?? null),
+		sessionCheck: (agent: AgentId) =>
+			rejectIf('sessionCheck', options.sessionChecks?.[agent] ?? true),
 		agentThemeSync: () => rejectIf('agentThemeSync', undefined)
 	};
 }

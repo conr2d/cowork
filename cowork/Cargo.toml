@@ -18,3 +18,4 @@ cowork-errors = { path = "../cowork-errors" }
 libc = "0.2"
 serde = { workspace = true }
 serde_json = { workspace = true }
+uuid = { workspace = true }

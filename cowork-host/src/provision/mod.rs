@@ -22,10 +22,12 @@ pub use command::{
 };
 pub use inject::{
     GUEST_BIN_PATH, RunOutcome, classify_run, cli_crashed_envelope, firstboot_setup_args,
-    launch_args, terminate_args, unc_inject_path,
+    launch_args, needs_inject, terminate_args, unc_inject_path,
 };
 #[cfg(windows)]
-pub use windows_inject::{inject_guest, run_guest, run_guest_events, setup_firstboot_user};
+pub use windows_inject::{
+    inject_guest, run_guest, run_guest_events, setup_firstboot_user, sync_guest,
+};
 #[cfg(windows)]
 pub use windows_provision::WindowsProvisionOps;
 

@@ -1,5 +1,5 @@
-//! Agent session UUID capture (v0.2 WP4d): scan durable agent session artifacts
-//! for the newest conversation tied to a workspace cwd and spawn time.
+//! Agent session UUID capture (v0.2 WP4d): inspect durable agent session
+//! artifacts for the conversation tied to a workspace cwd and spawn time.
 
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -8,6 +8,7 @@ use std::time::UNIX_EPOCH;
 
 use cowork_errors::protocol::{Message, PROTOCOL_VERSION};
 use cowork_errors::{Envelope, Stage};
+use uuid::Uuid;
 
 use crate::sink::ProgressSink;
 use crate::workspace::valid_slug;
@@ -17,6 +18,10 @@ use super::command::{self, Agent};
 /// `{home}/workspaces/{slug}` — the spawn cwd the agents key their sessions on.
 pub fn workspace_cwd(home: &str, slug: &str) -> String {
     format!("{home}/workspaces/{slug}")
+}
+
+pub fn valid_session_uuid(uuid: &str) -> bool {
+    Uuid::parse_str(uuid).is_ok()
 }
 
 /// Newest codex rollout in `codex_home/sessions/**` whose first-line
@@ -66,61 +71,103 @@ fn visit_codex_rollouts(
 }
 
 fn codex_rollout_uuid(path: &Path, cwd: &str) -> Option<String> {
-    let file = fs::File::open(path).ok()?;
-    let mut reader = BufReader::new(file);
-    let mut line = String::new();
-    reader.read_line(&mut line).ok()?;
-    let value = serde_json::from_str::<serde_json::Value>(&line).ok()?;
+    let value = rollout_first_line_json(path)?;
     if value["payload"]["cwd"].as_str() != Some(cwd) {
         return None;
     }
     value["payload"]["id"].as_str().map(str::to_string)
 }
 
-/// Newest `conversations/*.db` under agy_root whose raw bytes contain cwd and
-/// mtime > since_ms. Returns the file stem (the conversation UUID).
+fn codex_rollout_any_uuid(path: &Path) -> Option<String> {
+    let value = rollout_first_line_json(path)?;
+    value["payload"]["id"].as_str().map(str::to_string)
+}
+
+fn rollout_first_line_json(path: &Path) -> Option<serde_json::Value> {
+    let file = fs::File::open(path).ok()?;
+    let mut reader = BufReader::new(file);
+    let mut line = String::new();
+    reader.read_line(&mut line).ok()?;
+    serde_json::from_str::<serde_json::Value>(&line).ok()
+}
+
+/// Agy's authoritative cwd → UUID index in `cache/last_conversations.json`.
+/// The index has no timestamp metadata, so `since_ms` is intentionally unused
+/// for agy: if the cwd key exists, its UUID wins.
 pub fn agy_session_uuid(agy_root: &Path, cwd: &str, since_ms: u64) -> Option<String> {
-    let conversations = agy_root.join("conversations");
-    let Ok(entries) = fs::read_dir(conversations) else {
-        return None;
+    let _ = since_ms;
+    agy_last_conversations(agy_root)?
+        .remove(cwd)?
+        .as_str()
+        .map(str::to_string)
+}
+
+fn agy_last_conversations(agy_root: &Path) -> Option<serde_json::Map<String, serde_json::Value>> {
+    let path = agy_root.join("cache/last_conversations.json");
+    let bytes = fs::read(path).ok()?;
+    serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&bytes).ok()
+}
+
+pub fn claude_session_exists(claude_root: &Path, uuid: &str) -> bool {
+    path_named_exists(&claude_root.join("projects"), &format!("{uuid}.jsonl"))
+}
+
+pub fn codex_session_exists(codex_home: &Path, uuid: &str) -> bool {
+    rollout_with_uuid_exists(&codex_home.join("sessions"), uuid)
+}
+
+pub fn agy_session_exists(agy_root: &Path, uuid: &str) -> bool {
+    agy_root
+        .join("conversations")
+        .join(format!("{uuid}.db"))
+        .is_file()
+}
+
+fn path_named_exists(dir: &Path, file_name: &str) -> bool {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return false;
     };
-    let mut best: Option<(u64, String, String)> = None;
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("db") {
+        if path.is_dir() {
+            if path_named_exists(&path, file_name) {
+                return true;
+            }
             continue;
         }
-        let Some(mtime_ms) = modified_ms(&path) else {
-            continue;
-        };
-        if mtime_ms <= since_ms {
-            continue;
+        if path.file_name().and_then(|name| name.to_str()) == Some(file_name) {
+            return true;
         }
-        let Ok(bytes) = fs::read(&path) else {
-            continue;
-        };
-        if !contains_subslice(&bytes, cwd.as_bytes()) {
+    }
+    false
+}
+
+fn rollout_with_uuid_exists(dir: &Path, uuid: &str) -> bool {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if rollout_with_uuid_exists(&path, uuid) {
+                return true;
+            }
             continue;
         }
         let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+        if !file_name.starts_with("rollout-") || !file_name.ends_with(".jsonl") {
+            continue;
+        }
+        let Some(found_uuid) = codex_rollout_any_uuid(&path) else {
             continue;
         };
-        let candidate = (mtime_ms, file_name.to_string(), stem.to_string());
-        if best.as_ref().is_none_or(|current| candidate > *current) {
-            best = Some(candidate);
+        if found_uuid == uuid {
+            return true;
         }
     }
-    best.map(|(_, _, uuid)| uuid)
-}
-
-fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
-    needle.is_empty()
-        || haystack
-            .windows(needle.len())
-            .any(|window| window == needle)
+    false
 }
 
 fn modified_ms(path: &Path) -> Option<u64> {
@@ -162,12 +209,12 @@ pub fn run_session_uuid(
     let cwd = workspace_cwd(home, slug);
     let uuid = match agent {
         Agent::Codex => codex_session_uuid(
-            Path::new(&command::creds_dir(Agent::Codex, home)),
+            Path::new(&command::config_dir(Agent::Codex, home)),
             &cwd,
             since_ms,
         ),
         Agent::Antigravity => agy_session_uuid(
-            Path::new(&format!("{home}/.gemini/antigravity-cli")),
+            Path::new(&command::config_dir(Agent::Antigravity, home)),
             &cwd,
             since_ms,
         ),
@@ -177,6 +224,52 @@ pub fn run_session_uuid(
     sink.emit(&Message::SessionUuid {
         agent: agent.id().to_string(),
         uuid,
+    });
+    sink.emit(&Message::Done {
+        stage: Stage::Workspace,
+    });
+    SessionUuidOutcome::Done
+}
+
+pub fn run_session_check(
+    sink: &mut dyn ProgressSink,
+    agent: Agent,
+    home: &str,
+    uuid: &str,
+) -> SessionUuidOutcome {
+    sink.emit(&Message::Hello {
+        protocol_version: PROTOCOL_VERSION,
+    });
+
+    if !valid_session_uuid(uuid) {
+        let env = Envelope::new(
+            cowork_errors::Code::SessionUuidCaptureFailed,
+            Stage::Workspace,
+        )
+        .with_context("agent", agent.id())
+        .with_cause("invalid session uuid");
+        sink.emit(&Message::Error {
+            envelope: env.clone(),
+        });
+        return SessionUuidOutcome::Failed(env);
+    }
+
+    let exists = match agent {
+        Agent::Claude => {
+            claude_session_exists(Path::new(&command::config_dir(Agent::Claude, home)), uuid)
+        }
+        Agent::Codex => {
+            codex_session_exists(Path::new(&command::config_dir(Agent::Codex, home)), uuid)
+        }
+        Agent::Antigravity => agy_session_exists(
+            Path::new(&command::config_dir(Agent::Antigravity, home)),
+            uuid,
+        ),
+    };
+
+    sink.emit(&Message::SessionUuid {
+        agent: agent.id().to_string(),
+        uuid: exists.then(|| uuid.to_string()),
     });
     sink.emit(&Message::Done {
         stage: Stage::Workspace,
@@ -237,12 +330,24 @@ mod tests {
         .expect("write rollout");
     }
 
+    fn write_claude_conversation(root: &Path, dir: &str, uuid: &str) {
+        let path = root.join(format!("projects/{dir}"));
+        fs::create_dir_all(&path).expect("create claude dir");
+        fs::write(path.join(format!("{uuid}.jsonl")), b"{}\n").expect("write claude convo");
+    }
+
     #[test]
     fn workspace_cwd_formats_home_workspace_slug() {
         assert_eq!(
             workspace_cwd("/home/cowork", "demo"),
             "/home/cowork/workspaces/demo"
         );
+    }
+
+    #[test]
+    fn valid_session_uuid_accepts_and_rejects_expected_shapes() {
+        assert!(valid_session_uuid("550e8400-e29b-41d4-a716-446655440000"));
+        assert!(!valid_session_uuid("not-a-uuid"));
     }
 
     #[test]
@@ -295,16 +400,19 @@ mod tests {
         );
     }
 
+    fn write_agy_index(root: &Path, body: &str) {
+        let path = root.join("cache");
+        fs::create_dir_all(&path).expect("create agy cache dir");
+        fs::write(path.join("last_conversations.json"), body).expect("write agy index");
+    }
+
     #[test]
-    fn agy_db_matching_cwd_returns_stem() {
+    fn agy_index_matching_cwd_returns_uuid() {
         let home = TempHome::new("agy-match");
-        let conversations = home.path.join("conversations");
-        fs::create_dir_all(&conversations).expect("create conversations");
-        fs::write(
-            conversations.join("u1.db"),
-            b"prefix /home/u/workspaces/app suffix",
-        )
-        .expect("write db");
+        write_agy_index(
+            &home.path,
+            r#"{"/home/u/workspaces/app":"u1","/home/u/workspaces/other":"u2"}"#,
+        );
         assert_eq!(
             agy_session_uuid(&home.path, "/home/u/workspaces/app", 0).as_deref(),
             Some("u1")
@@ -312,24 +420,103 @@ mod tests {
     }
 
     #[test]
-    fn agy_skips_non_matching_sidecars_and_missing_dir() {
-        let home = TempHome::new("agy-skip");
-        let conversations = home.path.join("conversations");
-        fs::create_dir_all(&conversations).expect("create conversations");
-        fs::write(conversations.join("nope.db"), b"other cwd").expect("write db");
-        fs::write(conversations.join("u1.db-shm"), b"/home/u/workspaces/app")
-            .expect("write sidecar");
-        fs::write(conversations.join("u1.db-wal"), b"/home/u/workspaces/app")
-            .expect("write sidecar");
+    fn agy_index_missing_cwd_returns_none() {
+        let home = TempHome::new("agy-miss");
+        write_agy_index(&home.path, r#"{"/home/u/workspaces/other":"u2"}"#);
         assert_eq!(
             agy_session_uuid(&home.path, "/home/u/workspaces/app", 0),
             None
         );
+    }
+
+    #[test]
+    fn agy_index_malformed_returns_none() {
+        let home = TempHome::new("agy-malformed");
+        write_agy_index(&home.path, r#"["not","an","object"]"#);
+        assert_eq!(
+            agy_session_uuid(&home.path, "/home/u/workspaces/app", 0),
+            None
+        );
+    }
+
+    #[test]
+    fn agy_index_missing_file_returns_none() {
         let missing = TempHome::new("agy-missing");
         assert_eq!(
             agy_session_uuid(&missing.path, "/home/u/workspaces/app", 0),
             None
         );
+    }
+
+    #[test]
+    fn claude_session_exists_finds_recursive_match_only_by_exact_filename() {
+        let home = TempHome::new("claude-exists");
+        write_claude_conversation(&home.path, "proj-a", "550e8400-e29b-41d4-a716-446655440000");
+        write_claude_conversation(&home.path, "proj-b", "550e8400-e29b-41d4-a716-446655440001");
+        fs::write(
+            home.path
+                .join("projects/proj-b/550e8400-e29b-41d4-a716-446655440000.jsonl.bak"),
+            b"{}\n",
+        )
+        .expect("write unrelated file");
+        assert!(claude_session_exists(
+            &home.path,
+            "550e8400-e29b-41d4-a716-446655440000"
+        ));
+        assert!(!claude_session_exists(
+            &home.path,
+            "550e8400-e29b-41d4-a716-446655440099"
+        ));
+    }
+
+    #[test]
+    fn codex_session_exists_matches_payload_id_only() {
+        let home = TempHome::new("codex-exists");
+        write_rollout(
+            &home.path,
+            "rollout-2026-a-u1.jsonl",
+            "/home/u/workspaces/app",
+            "550e8400-e29b-41d4-a716-446655440000",
+        );
+        fs::write(
+            home.path
+                .join("sessions/2026/06/12/rollout-2026-b-garbage.jsonl"),
+            "not json\n",
+        )
+        .expect("write garbage");
+        assert!(codex_session_exists(
+            &home.path,
+            "550e8400-e29b-41d4-a716-446655440000"
+        ));
+        assert!(!codex_session_exists(
+            &home.path,
+            "550e8400-e29b-41d4-a716-446655440099"
+        ));
+    }
+
+    #[test]
+    fn agy_session_exists_matches_db_file_only() {
+        let home = TempHome::new("agy-exists");
+        let conversations = home.path.join("conversations");
+        fs::create_dir_all(&conversations).expect("create conversations");
+        fs::write(
+            conversations.join("550e8400-e29b-41d4-a716-446655440000.db"),
+            b"db",
+        )
+        .expect("write db");
+        fs::write(
+            conversations.join("550e8400-e29b-41d4-a716-446655440000.db-wal"),
+            b"db",
+        )
+        .expect("write wal");
+        assert!(agy_session_exists(
+            &home.path,
+            "550e8400-e29b-41d4-a716-446655440000"
+        ));
+        assert!(!agy_session_exists(
+            &home.path,
+            "550e8400-e29b-41d4-a716-446655440099"
+        ));
     }
 
     #[test]
@@ -380,5 +567,68 @@ mod tests {
             &sink.messages[1],
             Message::SessionUuid { agent, uuid } if agent == "claude" && uuid.is_none()
         ));
+    }
+
+    #[test]
+    fn run_session_check_claude_reports_found_uuid() {
+        let home = TempHome::new("check-claude");
+        write_claude_conversation(
+            &home.path.join(".claude"),
+            "proj-a",
+            "550e8400-e29b-41d4-a716-446655440000",
+        );
+        let mut sink = CollectingSink::default();
+        assert!(matches!(
+            run_session_check(
+                &mut sink,
+                Agent::Claude,
+                home.as_str(),
+                "550e8400-e29b-41d4-a716-446655440000"
+            ),
+            SessionUuidOutcome::Done
+        ));
+        assert!(matches!(
+            &sink.messages[1],
+            Message::SessionUuid { agent, uuid }
+                if agent == "claude"
+                    && uuid.as_deref() == Some("550e8400-e29b-41d4-a716-446655440000")
+        ));
+    }
+
+    #[test]
+    fn run_session_check_missing_uuid_reports_none() {
+        let home = TempHome::new("check-missing");
+        let mut sink = CollectingSink::default();
+        assert!(matches!(
+            run_session_check(
+                &mut sink,
+                Agent::Antigravity,
+                home.as_str(),
+                "550e8400-e29b-41d4-a716-446655440000"
+            ),
+            SessionUuidOutcome::Done
+        ));
+        assert!(matches!(
+            &sink.messages[1],
+            Message::SessionUuid { agent, uuid } if agent == "antigravity" && uuid.is_none()
+        ));
+    }
+
+    #[test]
+    fn run_session_check_invalid_uuid_emits_error() {
+        let home = TempHome::new("check-invalid");
+        let mut sink = CollectingSink::default();
+        assert!(matches!(
+            run_session_check(&mut sink, Agent::Claude, home.as_str(), "not-a-uuid"),
+            SessionUuidOutcome::Failed(_)
+        ));
+        let Message::Error { envelope } = &sink.messages[1] else {
+            panic!("expected error");
+        };
+        assert_eq!(envelope.code, cowork_errors::Code::SessionUuidCaptureFailed);
+        assert_eq!(
+            envelope.context.get("agent").map(String::as_str),
+            Some("claude")
+        );
     }
 }

@@ -3,11 +3,13 @@ import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
 import type { HostClient } from '$lib/host/client';
 import type { WorkspaceDto } from '$lib/host/types';
-import type { AgentId } from '$lib/terminal/login';
+import type { AgentId } from '$lib/terminal/agent';
 import {
 	nextSessionOrder,
 	nextSessionTitle,
 	pruneOpen,
+	resolveSessionLaunch,
+	type SessionLaunchPlan,
 	type SessionRef,
 	type SessionStatus,
 	sortedSessions
@@ -26,8 +28,7 @@ export interface SessionManager {
 	/** Workspace slug an undismissed concurrent-session advisory points at. */
 	readonly advisorySlug: string | null;
 	activeOf(slug: string): string | null;
-	/** Restored sessions (not created this app run) spawn with the agent's resume. */
-	isRestore(sessionId: string): boolean;
+	launchPlan(sessionId: string, fallbackUuid: string | null): SessionLaunchPlan;
 	/** Workspace became active: create its first session or activate its current tab. */
 	ensureActive(workspace: WorkspaceDto): Promise<void>;
 	/** ⊕ / picker: create + persist + activate. agent=null → the workspace default. */
@@ -56,11 +57,27 @@ export function createSessionManager(
 	const timers = new SvelteMap<string, ReturnType<typeof setTimeout>>();
 	const spawnedAt = new SvelteMap<string, number>();
 	const capturing = new SvelteSet<string>();
+	const launchPlans = new SvelteMap<string, SessionLaunchPlan>();
+	/**
+	 * Sessions whose `activate` is in flight. `activate` awaits (the claude
+	 * session-existence probe, the agy theme sync) between deciding to mount and
+	 * pushing to `open`, and the shell's effect can call `ensureActive` again
+	 * inside that window — both calls would pass the membership check and push,
+	 * giving `{#each ... (ref.sessionId)}` a duplicate key. This guard is set
+	 * SYNCHRONOUSLY, before the first await, so the second caller bails.
+	 */
+	const mounting = new SvelteSet<string>();
 
 	function clearTimer(sessionId: string): void {
 		const timer = timers.get(sessionId);
 		if (timer !== undefined) clearTimeout(timer);
 		timers.delete(sessionId);
+	}
+
+	function resolveSession(slug: string, sessionId: string) {
+		const workspace = shell.workspaces.find((item) => item.slug === slug);
+		const session = workspace?.sessions.find((item) => item.id === sessionId);
+		return { workspace, session };
 	}
 
 	async function maybeCapture(sessionId: string): Promise<void> {
@@ -96,8 +113,30 @@ export function createSessionManager(
 	async function activate(workspace: WorkspaceDto, sessionId: string): Promise<void> {
 		activeBySlug[workspace.slug] = sessionId;
 		statuses[sessionId] ??= 'cold';
-		if (!open.some((ref) => ref.sessionId === sessionId)) {
-			const session = workspace.sessions.find((item) => item.id === sessionId);
+		if (open.some((ref) => ref.sessionId === sessionId) || mounting.has(sessionId)) return;
+		mounting.add(sessionId);
+		try {
+			let session = workspace.sessions.find((item) => item.id === sessionId);
+			const launchPlan = session
+				? await resolveSessionLaunch(
+						host,
+						workspace.slug,
+						session,
+						!fresh.has(sessionId),
+						async (uuid) => {
+							const current = resolveSession(workspace.slug, sessionId);
+							if (!current.workspace || !current.session) return;
+							await shell.updateSessions(
+								current.workspace.slug,
+								current.workspace.sessions.map((item) =>
+									item.id === sessionId ? { ...item, agentSessionUuid: uuid } : item
+								)
+							);
+							session = resolveSession(workspace.slug, sessionId).session ?? session;
+						}
+					)
+				: { uuid: null, resume: false };
+			launchPlans.set(sessionId, launchPlan);
 			if (session?.agent === 'antigravity') {
 				try {
 					await host.agentThemeSync(theme());
@@ -105,7 +144,14 @@ export function createSessionManager(
 					// Best-effort: a failed sync still mounts; the scheme may be stale.
 				}
 			}
-			open.push({ slug: workspace.slug, sessionId });
+			// Re-check after the awaits: the session may have been deleted meanwhile,
+			// and a concurrent activate may already have mounted it.
+			const still = resolveSession(workspace.slug, sessionId).session;
+			if (still && !open.some((ref) => ref.sessionId === sessionId)) {
+				open.push({ slug: workspace.slug, sessionId });
+			}
+		} finally {
+			mounting.delete(sessionId);
 		}
 	}
 
@@ -152,8 +198,15 @@ export function createSessionManager(
 		activeOf(slug) {
 			return activeBySlug[slug] ?? null;
 		},
-		isRestore(sessionId) {
-			return !fresh.has(sessionId);
+		launchPlan(sessionId, fallbackUuid) {
+			// `activate` sets the plan before pushing to `open`, so a render should
+			// always find one. If it somehow does not, resume rather than guess a new
+			// session: with a stored uuid, `resume: false` makes codex and agy silently
+			// open a NEW conversation (they only pass the uuid when resuming) and makes
+			// claude spawn `--session-id`, which is fatal when the conversation exists.
+			// Resuming a conversation that is not there merely prints the agent's own
+			// error. Fail loudly, never lose history quietly.
+			return launchPlans.get(sessionId) ?? { uuid: fallbackUuid, resume: fallbackUuid !== null };
 		},
 		async ensureActive(workspace) {
 			if (workspace.sessions.length === 0) {
@@ -173,6 +226,7 @@ export function createSessionManager(
 			fresh.delete(sessionId);
 			spawnedAt.delete(sessionId);
 			capturing.delete(sessionId);
+			launchPlans.delete(sessionId);
 			clearTimer(sessionId);
 			delete statuses[sessionId];
 			await shell.updateSessions(
@@ -191,12 +245,19 @@ export function createSessionManager(
 			}
 		},
 		prune(workspaces) {
-			// untrack: prune is called from an effect tracking `workspaces`; reading
-			// `open` tracked would re-trigger on our own write and loop.
-			open = pruneOpen(
+			// prune runs inside an effect that tracks `workspaces`. Every read of
+			// `open` here must be untracked, including the one below: pruneOpen
+			// returns a NEW array each call, so a tracked read of what we just wrote
+			// would re-trigger this effect forever (effect_update_depth_exceeded).
+			// Hence `next`, the plain array — reading it is not reading the signal.
+			const next = pruneOpen(
 				untrack(() => open),
 				workspaces
 			);
+			open = next;
+			for (const sessionId of launchPlans.keys()) {
+				if (!next.some((ref) => ref.sessionId === sessionId)) launchPlans.delete(sessionId);
+			}
 		},
 		noteSpawn(sessionId) {
 			spawnedAt.set(sessionId, Date.now());

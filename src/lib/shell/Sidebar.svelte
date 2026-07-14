@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import AppBuildStamp from '$lib/components/AppBuildStamp.svelte';
 	import type { WorkspaceDto } from '$lib/host/types';
 	import * as m from '$lib/paraglide/messages';
 	import { dndzone, type DndEvent } from 'svelte-dnd-action';
@@ -11,6 +12,7 @@
 
 	let {
 		shell,
+		buildLabel,
 		collapsed,
 		theme,
 		renamingSlug,
@@ -22,6 +24,7 @@
 		onlistscroll
 	}: {
 		shell: Shell;
+		buildLabel: string | null;
 		collapsed: boolean;
 		theme: 'light' | 'dark';
 		renamingSlug: string | null;
@@ -116,6 +119,11 @@
 				</svg>
 				{#if !collapsed}<span>{m.shell_setup()}</span>{/if}
 			</button>
+			{#if !collapsed}
+				<div class="build-wrap">
+					<AppBuildStamp label={buildLabel} />
+				</div>
+			{/if}
 			<button
 				type="button"
 				class="theme-btn"
@@ -146,6 +154,7 @@
 		flex: 0 0 auto;
 		display: flex;
 		flex-direction: column;
+		min-height: 0;
 		padding: 16px 14px;
 		gap: 4px;
 		background: var(--paper);
@@ -261,6 +270,16 @@
 		align-items: center;
 		gap: 6px;
 	}
+	.build-wrap {
+		min-width: 0;
+		flex: 1 1 auto;
+		overflow: hidden;
+	}
+	.build-wrap :global(.build-stamp) {
+		display: block;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
 	:global(.collapsed) .foot-row {
 		flex-direction: column;
 	}
@@ -272,7 +291,7 @@
 		border-radius: 8px;
 		font-size: 13px;
 		color: var(--ink-soft);
-		flex: 1 1 auto;
+		flex: 0 1 auto;
 	}
 	.foot-btn:hover,
 	.theme-btn:hover {

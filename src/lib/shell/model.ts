@@ -1,5 +1,6 @@
+import type { HostClient } from '$lib/host/client';
 import type { SessionDto, WorkspaceDto } from '$lib/host/types';
-import type { AgentId } from '$lib/terminal/login';
+import type { AgentId } from '$lib/terminal/agent';
 
 /** Product brand shown in chrome (non-devs know these, not CLI names). */
 export function brand(agent: AgentId): string {
@@ -76,23 +77,68 @@ export function nextSessionTitle(sessions: readonly SessionDto[], agent: AgentId
 	return `${brand(agent)} ${count + 1}`;
 }
 
+export interface SessionLaunchPlan {
+	uuid: string | null;
+	resume: boolean;
+}
+
+export async function resolveSessionLaunch(
+	host: HostClient,
+	workspaceSlug: string,
+	session: SessionDto,
+	restore: boolean,
+	persistSessionUuid: (uuid: string) => Promise<void>
+): Promise<SessionLaunchPlan> {
+	const launchUuid = session.agentSessionUuid ?? null;
+	if (session.agent === 'antigravity') {
+		if (launchUuid !== null) {
+			return { uuid: launchUuid, resume: restore };
+		}
+		if (!restore) return { uuid: null, resume: false };
+		try {
+			const capturedUuid = await host.captureSessionUuid(session.agent, workspaceSlug, 0);
+			if (capturedUuid !== null) {
+				await persistSessionUuid(capturedUuid);
+				return { uuid: capturedUuid, resume: true };
+			}
+		} catch {
+			// Best-effort: a failed probe must not block a working launch.
+		}
+		return { uuid: null, resume: false };
+	}
+	if (session.agent !== 'claude') {
+		return { uuid: launchUuid, resume: restore && launchUuid !== null };
+	}
+	if (launchUuid === null) {
+		const mintedUuid = crypto.randomUUID();
+		await persistSessionUuid(mintedUuid);
+		return { uuid: mintedUuid, resume: false };
+	}
+	if (!restore) return { uuid: launchUuid, resume: false };
+	try {
+		const exists = await host.sessionCheck(session.agent, launchUuid);
+		return { uuid: launchUuid, resume: exists };
+	} catch {
+		// Best-effort: a failed probe must not block a working resume.
+		return { uuid: launchUuid, resume: true };
+	}
+}
+
 /**
  * The command autorun at PTY spawn for a session. Fresh claude sessions pin a
- * host-generated UUID (--session-id) so a later restore can resume; codex and
- * antigravity UUIDs are captured lazily after first activity, so a fresh spawn
- * is bare and only a restore resumes. A restored session whose conversation
- * never materialized surfaces the agent's own error — accepted; the user opens
- * a new tab.
+ * host-generated UUID (--session-id) so a later restore can resume; codex UUIDs
+ * are captured lazily after first activity; and a restored agy session with no
+ * stored UUID heals itself from agy's cwd index before falling back to bare.
  */
-export function sessionLaunch(agent: AgentId, uuid: string | null, restore: boolean): string {
+export function sessionLaunch(agent: AgentId, uuid: string | null, resume: boolean): string {
 	if (uuid === null) return agentBinary(agent);
 	switch (agent) {
 		case 'claude':
-			return restore ? `claude --resume ${uuid}` : `claude --session-id ${uuid}`;
+			return resume ? `claude --resume ${uuid}` : `claude --session-id ${uuid}`;
 		case 'codex':
-			return restore ? `codex resume ${uuid}` : agentBinary(agent);
+			return resume ? `codex resume ${uuid}` : agentBinary(agent);
 		case 'antigravity':
-			return restore ? `agy --conversation ${uuid}` : agentBinary(agent);
+			return resume ? `agy --conversation ${uuid}` : agentBinary(agent);
 	}
 }
 

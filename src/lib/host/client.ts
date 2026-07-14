@@ -3,10 +3,10 @@
 // mock from `./mock`. Every `@tauri-apps/api` import is dynamic (inside the
 // method) so this module is safe to import from prerendered routes.
 
-import type { AgentId } from '$lib/terminal/login';
+import type { AgentId } from '$lib/terminal/agent';
 import type { Envelope } from '$lib/errors/registry';
 import type {
-	AgentAuthStatusDto,
+	AppBuildDto,
 	PreflightReport,
 	ProgressEvent,
 	ProvisionDto,
@@ -18,13 +18,15 @@ import type {
 
 /** The setup operations the wizard performs. Methods reject with an `Envelope`. */
 export interface HostClient {
+	appBuild(): Promise<AppBuildDto>;
 	preflightRun(): Promise<PreflightReport>;
 	wslEnable(selectedAgents: AgentId[]): Promise<WslEnableDto>;
 	provisionRun(): Promise<ProvisionDto>;
+	/** Re-inject the guest CLI if the installed copy is stale. */
+	guestSync(): Promise<boolean>;
 	guestBootstrap(onProgress: (event: ProgressEvent) => void): Promise<void>;
 	guestAgentInstall(agents: AgentId[], onProgress: (event: ProgressEvent) => void): Promise<void>;
 	removeCoworkDistro(): Promise<void>;
-	isResumeLaunch(): Promise<boolean>;
 	getResumeState(): Promise<ResumeDto | null>;
 	clearResume(): Promise<void>;
 	setupIsComplete(): Promise<boolean>;
@@ -35,8 +37,8 @@ export interface HostClient {
 	workspaceDelete(slug: string): Promise<void>;
 	workspaceSlugPreview(name: string): Promise<string>;
 	workspaceOpenFiles(slug: string): Promise<void>;
-	verifyAgentAuth(agent: AgentId): Promise<AgentAuthStatusDto>;
 	captureSessionUuid(agent: AgentId, slug: string, sinceMs: number): Promise<string | null>;
+	sessionCheck(agent: AgentId, uuid: string): Promise<boolean>;
 	agentThemeSync(theme: 'light' | 'dark'): Promise<void>;
 }
 
@@ -47,6 +49,10 @@ export function asEnvelope(error: unknown): Envelope {
 
 /** The production client, backed by the Tauri command bridge. */
 export const tauriHost: HostClient = {
+	async appBuild() {
+		const { invoke } = await import('@tauri-apps/api/core');
+		return invoke<AppBuildDto>('app_build');
+	},
 	async preflightRun() {
 		const { invoke } = await import('@tauri-apps/api/core');
 		return invoke<PreflightReport>('preflight_run');
@@ -58,6 +64,10 @@ export const tauriHost: HostClient = {
 	async provisionRun() {
 		const { invoke } = await import('@tauri-apps/api/core');
 		return invoke<ProvisionDto>('provision_run');
+	},
+	async guestSync() {
+		const { invoke } = await import('@tauri-apps/api/core');
+		return invoke<boolean>('guest_sync');
 	},
 	async guestBootstrap(onProgress) {
 		const { invoke, Channel } = await import('@tauri-apps/api/core');
@@ -74,10 +84,6 @@ export const tauriHost: HostClient = {
 	async removeCoworkDistro() {
 		const { invoke } = await import('@tauri-apps/api/core');
 		await invoke('remove_cowork_distro');
-	},
-	async isResumeLaunch() {
-		const { invoke } = await import('@tauri-apps/api/core');
-		return invoke<boolean>('is_resume_launch');
 	},
 	async getResumeState() {
 		const { invoke } = await import('@tauri-apps/api/core');
@@ -119,13 +125,13 @@ export const tauriHost: HostClient = {
 		const { invoke } = await import('@tauri-apps/api/core');
 		await invoke('workspace_open_files', { slug });
 	},
-	async verifyAgentAuth(agent) {
-		const { invoke } = await import('@tauri-apps/api/core');
-		return invoke<AgentAuthStatusDto>('verify_agent_auth', { agent });
-	},
 	async captureSessionUuid(agent, slug, sinceMs) {
 		const { invoke } = await import('@tauri-apps/api/core');
 		return invoke<string | null>('capture_session_uuid', { agent, slug, sinceMs });
+	},
+	async sessionCheck(agent, uuid) {
+		const { invoke } = await import('@tauri-apps/api/core');
+		return invoke<boolean>('session_check', { agent, uuid });
 	},
 	async agentThemeSync(theme) {
 		const { invoke } = await import('@tauri-apps/api/core');

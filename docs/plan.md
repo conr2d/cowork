@@ -1,5 +1,20 @@
 # Cowork — Roadmap & Plan
 
+> **⚠️ Partly superseded — do not take the roadmap or the credential decision from this file.**
+> It was written before v0.1 shipped and has not been re-cut since. Two things in it are now
+> wrong and will actively mislead:
+> - **The roadmap table below predates the insertion of v0.2 Workspace and the 2026-07-14
+>   reorder.** The roadmap of record is `README.md`, restated in `AGENTS.md` § Scope discipline:
+>   v0.1 Setup · v0.2 Workspace · **v0.3 Design** · v0.4 Isolation · v0.5 Recovery · v0.6
+>   Community · v0.7 Observability.
+> - **Locked decision #13 (route credentials to `~/.cowork/creds/`) was reversed** in `eab7522`.
+>   Credentials live at each agent's own default path inside the distro; the distro *is* the
+>   boundary. Central routing fought the agents' OAuth refresh.
+>
+> What is still good here: the "Context" section, the locked decisions other than #13, and the
+> forward-dependency notes. Architecture of record for isolation is
+> [`architecture/isolation-and-platforms.md`](./architecture/isolation-and-platforms.md).
+
 > Strategic plan: what Cowork is, the version roadmap, the locked decisions, and the cross-version forward dependencies. The full v0.1 implementation spec lives in [`v0.1.md`](./v0.1.md).
 
 ## Context

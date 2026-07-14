@@ -30,7 +30,7 @@ v0.1 Setup · v0.2 Workspace · **v0.3 Design** · v0.4 Isolation · v0.5 Recove
 
 **Do NOT** implement a later version's goal early. Credentials stay at each agent's default path inside the distro, which is the isolation boundary; a credential vault remains out of scope.
 
-**Isolation moved from v0.3 to v0.4** (2026-07-14). Cowork is single-user and single-machine, the environment already works without it, and no harm has been observed. Design took its place: a vitamin-class product is judged on how finished it feels, and the v0.2 gate exposed exactly the kind of rough edge that makes a non-developer quit. See `docs/architecture/isolation-and-platforms.md` D5 for what isolation now costs and what it buys — including one risk (Windows interop) we accept on purpose.
+**Isolation moved from v0.3 to v0.4** (2026-07-14) — on **priority**, not because the risk went away. Cowork is single-user and single-machine, and the environment already works without isolation; design does not. A vitamin-class product is judged on how finished it feels, and the v0.2 gate exposed exactly the kind of rough edge that makes a non-developer quit. Note that "we have not seen harm" is *not* part of the argument: with no users, that is a statement about our user count, not about the risk. See `docs/architecture/isolation-and-platforms.md` D5, which records one risk (Windows interop, and therefore prompt injection) that we accept **on purpose and revisit before any release beyond the author**.
 
 ## Work intake — file it, do not fix it
 

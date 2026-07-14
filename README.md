@@ -26,10 +26,11 @@ It runs on an AI subscription the user already has — no extra cost, and no mod
 |---|---|
 | v0.1 | **Setup** — WSL2 → Ubuntu → toolchain → agent install → terminal |
 | v0.2 | **Workspace** — workspaces, sessions that survive a restart, file exchange |
-| v0.3 | **Isolation** — an environment the agent cannot reach out of |
-| v0.4 | Recovery — invisible versioning + one-click undo |
-| v0.5 | Community — template sharing |
-| v0.6 | Observability + budget |
+| v0.3 | **Design** — the wizard, the shell and the terminal become one product |
+| v0.4 | Isolation — an environment the agent cannot reach out of |
+| v0.5 | Recovery — invisible versioning + one-click undo |
+| v0.6 | Community — template sharing |
+| v0.7 | Observability + budget |
 
 Foundations (isolation, recovery, observability) are deliberately **sequenced**, not bolted
 on afterwards.

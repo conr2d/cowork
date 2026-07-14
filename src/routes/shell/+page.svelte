@@ -206,6 +206,7 @@
 						ref.slug === shell.activeSlug && manager.activeOf(ref.slug) === session.id}
 					<div class="term-slot" class:is-active={isActive}>
 						<Terminal
+							sessionId={session.id}
 							distro="Cowork"
 							workspace={`~/workspaces/${ref.slug}`}
 							locale={getLocale()}

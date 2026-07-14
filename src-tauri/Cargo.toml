@@ -40,6 +40,7 @@ tauri-plugin-opener = "2"
 tauri-plugin-fs = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }
+uuid = { workspace = true }
 # Host driver logic (PTY session, wsl.exe, preflight, …) lives in cowork-host;
 # src-tauri is the thin Tauri command/event layer over it. cowork-errors gives
 # the structured Envelope returned from commands to the localizing frontend.

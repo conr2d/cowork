@@ -36,6 +36,7 @@
 	}
 
 	let {
+		sessionId = crypto.randomUUID(),
 		distro = 'Cowork',
 		workspace = '~',
 		locale = 'en',
@@ -46,13 +47,14 @@
 		active = false,
 		onactivity = undefined
 	}: {
+		sessionId?: string;
 		distro?: string;
 		workspace?: string;
 		locale?: string;
 		detectLinks?: boolean;
 		theme?: 'light' | 'dark';
 		autorun?: string;
-		onspawn?: (id: number) => void;
+		onspawn?: () => void;
 		active?: boolean;
 		onactivity?: (event: 'output' | 'exit') => void;
 	} = $props();
@@ -64,6 +66,10 @@
 	let openUrl = $state<((url: string) => Promise<void>) | undefined>(undefined);
 	let initFailure = $state<{ envelope: Envelope } | { message: string } | null>(null);
 	let initNotice = $state<string | null>(null);
+	let retrySpawn = $state<(() => void) | null>(null);
+	let spawning = $state(false);
+
+	const SPAWN_TIMEOUT_MS = 10_000;
 
 	function clearDetectedUrl() {
 		detectedUrl = null;
@@ -122,6 +128,31 @@
 		initFailure = isEnvelope(error)
 			? { envelope: asEnvelope(error) }
 			: { message: messageFrom(error) };
+	}
+
+	function clearFailure(): void {
+		initFailure = null;
+		retrySpawn = null;
+	}
+
+	function timeoutMessage(action: string): Error {
+		return new Error(`${action} timed out after ${SPAWN_TIMEOUT_MS / 1000} seconds.`);
+	}
+
+	function withTimeout<T>(task: Promise<T>, action: string): Promise<T> {
+		return new Promise<T>((resolve, reject) => {
+			const timeout = window.setTimeout(() => reject(timeoutMessage(action)), SPAWN_TIMEOUT_MS);
+			void task.then(
+				(value) => {
+					clearTimeout(timeout);
+					resolve(value);
+				},
+				(error) => {
+					clearTimeout(timeout);
+					reject(error);
+				}
+			);
+		});
 	}
 
 	// Attribute a failing chunk load to its module. The specifier must stay a
@@ -211,6 +242,9 @@
 
 	onMount(() => {
 		let disposed = false;
+		// Proof of life: any byte from the PTY means the spawn worked, regardless of
+		// whether its IPC response ever came back.
+		let sawOutput = false;
 		// Init runs in an async IIFE; onMount itself must return the (sync) cleanup.
 		void (async () => {
 			try {
@@ -333,6 +367,7 @@
 
 				const visibility = await waitForVisibleContainer(container, () => disposed);
 				if (visibility !== 'visible') {
+					retrySpawn = null;
 					if (visibility === 'timed-out') {
 						captureFailure(
 							new Error(
@@ -371,44 +406,10 @@
 				// Fit BEFORE spawn so the ConPTY is the measured size from the first byte
 				// (a hardcoded default corrupts a full-screen TUI's first frame).
 				fit.fit();
-				const initialViewport = currentViewport(term);
 
 				const scanner = createUrlScanner();
 				const decoder = new TextDecoder();
-				const channel = new Channel<string>();
-				channel.onmessage = (chunk) => {
-					if (chunk === '') {
-						// Host EOF sentinel: the PTY child exited.
-						onactivity?.('exit');
-						return;
-					}
-					const bytes = base64ToBytes(chunk);
-					term.write(bytes);
-					onactivity?.('output');
-					// createUrlScanner only reports OAuth/device sign-in URLs (isLoginUrl),
-					// so an agent's own login prompt surfaces the button while the shell's
-					// MOTD and docs links never do.
-					if (detectLinks && openUrl) {
-						const url = scanner.push(decoder.decode(bytes, { stream: true }));
-						if (url) detectedUrl = url;
-					}
-				};
-
-				const sessionId = await invoke<number>('pty_spawn', {
-					onData: channel,
-					distro,
-					workspace,
-					locale,
-					rows: initialViewport.rows,
-					cols: initialViewport.cols
-				});
-				if (disposed) {
-					void invoke('pty_kill', { id: sessionId });
-					term.dispose();
-					return;
-				}
-				onspawn?.(sessionId);
-				term.focus();
+				let activeChannel: { onmessage: ((chunk: string) => void) | null } | null = null;
 				const dataSub = term.onData((data) => {
 					void invoke('pty_write', { id: sessionId, data });
 				});
@@ -422,6 +423,10 @@
 				observer.observe(container);
 
 				cleanup = () => {
+					if (activeChannel) {
+						activeChannel.onmessage = null;
+						activeChannel = null;
+					}
 					dataSub.dispose();
 					observer.disconnect();
 					void invoke('pty_kill', { id: sessionId });
@@ -432,14 +437,76 @@
 					cleanup = undefined;
 					return;
 				}
-				if (autorun) {
-					await invoke('pty_write', { id: sessionId, data: `${autorun}\n` });
-					if (disposed) {
-						cleanup();
-						cleanup = undefined;
+
+				const handleSpawnFailure = (error: unknown) => {
+					if (disposed) return;
+					// The whole point of the caller-owned id is that a LOST spawn response no
+					// longer breaks the terminal: the PTY is running and its output is already
+					// arriving on the channel. Covering a demonstrably live terminal with an
+					// error panel would reintroduce the bug from the other side. Output is the
+					// proof of life — if we have seen any, the spawn worked, whatever the
+					// response did.
+					if (sawOutput) {
+						console.error(error);
 						return;
 					}
-				}
+					captureFailure(error);
+					retrySpawn = () => {
+						void spawn().catch(handleSpawnFailure);
+					};
+				};
+
+				const spawn = async () => {
+					if (spawning) return;
+					spawning = true;
+					sawOutput = false;
+					clearFailure();
+					try {
+						if (activeChannel) activeChannel.onmessage = null;
+						const channel = new Channel<string>();
+						channel.onmessage = (chunk) => {
+							if (chunk === '') {
+								// Host EOF sentinel: the PTY child exited.
+								onactivity?.('exit');
+								return;
+							}
+							if (!sawOutput && initFailure) clearFailure();
+							sawOutput = true;
+							const bytes = base64ToBytes(chunk);
+							term.write(bytes);
+							onactivity?.('output');
+							// createUrlScanner only reports OAuth/device sign-in URLs (isLoginUrl),
+							// so an agent's own login prompt surfaces the button while the shell's
+							// MOTD and docs links never do.
+							if (detectLinks && openUrl) {
+								const url = scanner.push(decoder.decode(bytes, { stream: true }));
+								if (url) detectedUrl = url;
+							}
+						};
+						activeChannel = channel;
+						const viewport = currentViewport(term);
+						await withTimeout(
+							invoke('pty_spawn', {
+								id: sessionId,
+								onData: channel,
+								distro,
+								workspace,
+								locale,
+								rows: viewport.rows,
+								cols: viewport.cols,
+								autorun
+							}),
+							'Terminal startup'
+						);
+					} finally {
+						spawning = false;
+					}
+				};
+
+				void spawn().catch(handleSpawnFailure);
+
+				onspawn?.();
+				term.focus();
 			} catch (error) {
 				captureFailure(error);
 				console.error(error);
@@ -484,6 +551,16 @@
 					{/if}
 				{:else}
 					<p>{initFailure.message}</p>
+				{/if}
+				{#if retrySpawn}
+					<button
+						type="button"
+						class="terminal-error-retry"
+						onclick={retrySpawn}
+						disabled={spawning}
+					>
+						{spawning ? m.error_retrying() : m.error_retry()}
+					</button>
 				{/if}
 			</div>
 		</section>
@@ -609,6 +686,22 @@
 		font-size: 0.75rem;
 		white-space: pre-wrap;
 		word-break: break-word;
+	}
+	.terminal-error-retry {
+		align-self: flex-start;
+		border-radius: 999px;
+		padding: 0.55rem 0.9rem;
+		background: var(--terminal-overlay-fg);
+		color: var(--terminal-overlay-bg);
+		font-size: 0.875rem;
+		font-weight: 600;
+	}
+	.terminal-error-retry:hover {
+		opacity: 0.92;
+	}
+	.terminal-error-retry:focus-visible {
+		outline: 2px solid var(--terminal-overlay-muted);
+		outline-offset: 2px;
 	}
 	.terminal-notice {
 		top: 0;

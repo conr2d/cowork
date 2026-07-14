@@ -10,7 +10,7 @@ fn args_of(cmd: &PtyCommand) -> Vec<&str> {
 
 #[test]
 fn terminal_launch_builds_interactive_wsl_shell() {
-    let cmd = terminal_launch("Cowork", "/home/u/cowork", "ko");
+    let cmd = terminal_launch("Cowork", "/home/u/cowork", "ko", None);
     assert_eq!(cmd.program, "wsl.exe");
     let args = args_of(&cmd);
     for expected in [
@@ -37,8 +37,27 @@ fn terminal_launch_builds_interactive_wsl_shell() {
 
 #[test]
 fn terminal_launch_locale_maps_lang() {
-    assert!(args_of(&terminal_launch("Cowork", "/h", "ja")).contains(&"LANG=ja_JP.UTF-8"));
-    assert!(args_of(&terminal_launch("Cowork", "/h", "en")).contains(&"LANG=en_US.UTF-8"));
+    assert!(args_of(&terminal_launch("Cowork", "/h", "ja", None)).contains(&"LANG=ja_JP.UTF-8"));
+    assert!(args_of(&terminal_launch("Cowork", "/h", "en", None)).contains(&"LANG=en_US.UTF-8"));
+}
+
+#[test]
+fn terminal_launch_execs_escaped_autorun_in_place_of_shell() {
+    let cmd = terminal_launch(
+        "Cowork",
+        "/home/u/cowork",
+        "en",
+        Some("agent --flag o'neal"),
+    );
+    assert_eq!(cmd.program, "wsl.exe");
+    assert_eq!(
+        &cmd.args[cmd.args.len() - 3..],
+        &[
+            "bash".to_string(),
+            "-lic".to_string(),
+            "exec 'agent' '--flag' 'o'\\''neal'".to_string(),
+        ]
+    );
 }
 
 #[test]

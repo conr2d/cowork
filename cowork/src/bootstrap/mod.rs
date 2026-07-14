@@ -145,6 +145,7 @@ fn run_steps(
     // 4. profile activation lines (idempotent append).
     progress(sink, command::step::SHELLRC);
     ensure_profile(ops, &config.home)?;
+    ensure_hushlogin(ops, &config.home)?;
 
     // 5. locales (no dedicated code → internal.unknown).
     progress(sink, command::step::LOCALES);
@@ -180,6 +181,15 @@ fn ensure_profile(ops: &mut dyn BootstrapOps, home: &str) -> Result<(), Envelope
         }
     }
     Ok(())
+}
+
+fn ensure_hushlogin(ops: &mut dyn BootstrapOps, home: &str) -> Result<(), Envelope> {
+    let file = command::hushlogin_path(home);
+    if ops.path_exists(&file) {
+        return Ok(());
+    }
+    ops.touch(&file)
+        .map_err(|e| command::profile_write_failed_envelope(&file).with_cause(&e))
 }
 
 /// Run `cmd`; `Ok(())` on a zero exit, `Err(CmdFail)` otherwise.
@@ -252,6 +262,7 @@ mod tests {
         files: HashMap<String, String>,
         fail: HashMap<String, i32>,
         append_fail: bool,
+        touch_fail_paths: HashSet<String>,
         dir_fail_paths: HashSet<String>,
         runs: Vec<Cmd>,
         dirs: Vec<String>,
@@ -264,6 +275,7 @@ mod tests {
                 files: HashMap::new(),
                 fail: HashMap::new(),
                 append_fail: false,
+                touch_fail_paths: HashSet::new(),
                 dir_fail_paths: HashSet::new(),
                 runs: Vec::new(),
                 dirs: Vec::new(),
@@ -345,6 +357,14 @@ mod tests {
             } else {
                 Ok(())
             }
+        }
+
+        fn touch(&mut self, path: &str) -> Result<(), String> {
+            if self.touch_fail_paths.contains(path) {
+                return Err("touch denied".to_string());
+            }
+            self.files.entry(path.to_string()).or_default();
+            Ok(())
         }
     }
 
@@ -435,6 +455,25 @@ mod tests {
     }
 
     #[test]
+    fn hushlogin_is_created_when_absent() {
+        let mut ops = MockOps::new();
+        let mut sink = CollectingSink::default();
+        let out = run_bootstrap(&mut ops, &mut sink, &config());
+        assert!(matches!(out, BootstrapOutcome::Done));
+        assert!(ops.files.contains_key(&command::hushlogin_path("/home/u")));
+    }
+
+    #[test]
+    fn hushlogin_is_left_alone_when_present() {
+        let mut ops = MockOps::new();
+        ops.present.insert(command::hushlogin_path("/home/u"));
+        let mut sink = CollectingSink::default();
+        let out = run_bootstrap(&mut ops, &mut sink, &config());
+        assert!(matches!(out, BootstrapOutcome::Done));
+        assert!(!ops.files.contains_key(&command::hushlogin_path("/home/u")));
+    }
+
+    #[test]
     fn mise_shims_dir_is_created_after_mise_step() {
         let mut ops = MockOps::new();
         let mut sink = CollectingSink::default();
@@ -506,6 +545,16 @@ mod tests {
         let mut ops = MockOps::new();
         ops.dir_fail_paths
             .insert(command::mise_shims_dir("/home/u"));
+        let mut sink = CollectingSink::default();
+        let out = run_bootstrap(&mut ops, &mut sink, &config());
+        assert_failed_with(out, cowork_errors::Code::ToolchainProfileWriteFailed);
+    }
+
+    #[test]
+    fn hushlogin_failure_maps_to_profile_code() {
+        let mut ops = MockOps::new();
+        ops.touch_fail_paths
+            .insert(command::hushlogin_path("/home/u"));
         let mut sink = CollectingSink::default();
         let out = run_bootstrap(&mut ops, &mut sink, &config());
         assert_failed_with(out, cowork_errors::Code::ToolchainProfileWriteFailed);

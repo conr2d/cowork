@@ -103,6 +103,12 @@ pub fn profile_path(home: &str) -> String {
     format!("{home}/.profile")
 }
 
+/// `<home>/.hushlogin` — suppresses Ubuntu's login-shell MOTD so the embedded
+/// terminal hands control directly to the agent UI.
+pub fn hushlogin_path(home: &str) -> String {
+    format!("{home}/.hushlogin")
+}
+
 /// The default workspace directory created during bootstrap: `<home>/workspaces/default`.
 /// Workspaces live under a `workspaces/` container (one per agent session, created
 /// repeatedly); `default` is the single workspace seeded in v0.1. The container shape
@@ -252,6 +258,7 @@ mod tests {
         assert_eq!(mise_bin("/home/u"), "/home/u/.local/bin/mise");
         assert_eq!(mise_shims_dir("/home/u"), "/home/u/.local/share/mise/shims");
         assert_eq!(profile_path("/home/u"), "/home/u/.profile");
+        assert_eq!(hushlogin_path("/home/u"), "/home/u/.hushlogin");
         assert_eq!(workspace_path("/home/u"), "/home/u/workspaces/default");
     }
 

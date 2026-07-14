@@ -1,9 +1,11 @@
 # Isolation and platforms
 
-**Status:** accepted (design), 2026-07-10; D4 and §7 revised the same day. Supersedes the
-implicit isolation claim of v0.1.
-**Scope:** what Cowork isolates, how, and what that implies for macOS. Feeds the v0.3
-Isolation work package. Nothing here is implemented yet, except §9.
+**Status:** accepted (design), 2026-07-10; D4 and §7 revised the same day. D5 and §8 revised
+2026-07-14 with measurements (L1 rejected, L3 confirmed feasible). Supersedes the implicit
+isolation claim of v0.1.
+**Scope:** what Cowork isolates, how, and what that implies for macOS. Feeds the **v0.4**
+Isolation work package — deferred from v0.3 because the product is single-user and
+single-machine and no harm has been observed. Nothing here is implemented yet, except §9.
 
 ---
 
@@ -139,18 +141,48 @@ mechanism, and `cowork-host/src/workspace/mod.rs::files_unc_path` stays. On Wind
 
 ### D5 — Hardening ladder
 
-| | Change | Residual risk / what breaks |
-|---|---|---|
-| **L1** | `wsl.conf`: `[automount] enabled=false`, `[interop] enabled=false, appendWindowsPath=false` (Lima: no host mounts at all) | With sudo, `mount -t drvfs` re-mounts `C:`. **`interop=false` breaks the agents' automatic browser launch for OAuth.** |
-| **L2** | Drop `/etc/sudoers.d/cowork` after provisioning; installs run as root at provision time | brew and mise self-update still work (they own their prefixes); `apt` becomes app-mediated |
-| **L3** | bubblewrap per session: workspace RW, that agent's config dir RW, toolchain RO, rest of `$HOME` invisible, private `/tmp` | Network stays open (§2). Agents that apply their own sandbox nest a second one. |
+| | Change | Status | Residual risk / what breaks |
+|---|---|---|---|
+| **L1** | `wsl.conf`: `[automount] enabled=false`, `[interop] enabled=false, appendWindowsPath=false` (Lima: no host mounts at all) | **Rejected on Windows** (2026-07-14) | See below — the cost is sign-in, the benefit is against a threat we have not observed |
+| **L2** | Drop `/etc/sudoers.d/cowork` after provisioning; installs run as root at provision time | Open | brew and mise self-update still work (they own their prefixes); `apt` becomes app-mediated |
+| **L3** | bubblewrap per session: workspace RW, that agent's config dir RW, toolchain RO, rest of `$HOME` invisible, private `/tmp` | **Feasible, measured** | Network stays open (§2). Agents that apply their own sandbox nest a second one — unmeasured |
 
-L1's browser breakage is already mitigated: sign-in happens inside the session terminal, and
-the host detects the OAuth URL and opens it in the real browser ("Open sign-in page",
-release-blocking in `v0.2-full-gate.md` §8). Whether all three agents *print* the URL when
-interop is off is unverified — spike S1.
+**L1 is rejected, and the risk it would have covered is accepted.** `interop=true` lets the
+guest execute Windows binaries **as the Windows user, with no sandbox and no UAC prompt** —
+`powershell.exe -c "Get-Content $env:USERPROFILE\.ssh\id_rsa"` works from inside the distro.
+That is the largest B1 hole there is, and it also makes `automount=false` nearly moot on its
+own: killing `/mnt/c` buys little while `powershell.exe` still reads and writes all of `C:`.
+
+We accept it anyway. Turning interop off breaks the agents' automatic browser launch, leaving
+the printed-URL path (§ "Open sign-in page") as the *only* way to sign in — a path already
+fragile enough that claude hard-wraps its own URL. The realistic threat is not a malicious
+agent but a **prompt-injected** one: an agent reads a hostile README or web page and runs
+`powershell.exe`. For a single-user, single-machine product with no observed incident, that
+trade goes to sign-in that works. **This is an accepted risk. It is not a safe configuration,
+and must never be described as one.** Revisit if the product ever gains a multi-user or
+untrusted-input surface.
 
 L2 makes a **sudo-free package manager mandatory**, which is why brew exists (§6).
+
+**L3 works on WSL2 with no AppArmor work at all** (measured 2026-07-14; kernel
+6.18.33.2-microsoft-standard-WSL2). The Microsoft kernel compiles AppArmor in but does not
+enable it — no `security=apparmor`, no securityfs, and so Ubuntu 24.04's
+`kernel.apparmor_restrict_unprivileged_userns=1` does not exist. apt's `bubblewrap` 0.9.0
+creates an unprivileged user namespace as the `cowork` user and exits 0. No profile, no
+sysctl override, no setuid binary.
+
+Two consequences worth carrying:
+
+- **Use apt's `/usr/bin/bwrap`, not brew's.** The path is stable; brew's real binary sits at
+  `Cellar/bubblewrap/<version>/bin/bwrap`, so any path-matched policy detaches on upgrade.
+  brew exists so *agents* can install packages without sudo (§6); bwrap is our infrastructure,
+  not an agent-facing package.
+- **There is no LSM backstop.** On stock Ubuntu, the shipped `bwrap-userns-restrict` profile
+  confines bwrap's children with `audit deny capability`, so bwrap cannot become a general
+  userns-restriction bypass. On WSL2 that machinery is absent, so the isolation rests
+  **entirely** on bwrap's own flags and mount namespace. Get `--unshare-all` or a bind wrong
+  and nothing catches it. On macOS/Lima, where AppArmor *is* enforcing, that profile becomes
+  necessary again — see #7 for the version to use.
 
 L3's git-dir placement (§7) means the undo history sits outside every sandbox: an agent
 cannot destroy the record of what it did.
@@ -277,8 +309,9 @@ Each is stated so a result decides something.
 
 | # | Spike | Decides |
 |---|---|---|
-| **S1** | With `interop=false`, do claude / codex / agy print the OAuth URL to stdout? | Whether L1 ships, or whether we need a host-side browser bridge |
-| **S2** | Does Ubuntu 24.04's `kernel.apparmor_restrict_unprivileged_userns` block bubblewrap inside the WSL2 kernel? Does an agent's own sandbox nest inside ours? | Whether L3 is bubblewrap or something else |
+| ~~S1~~ | ~~With `interop=false`, do claude / codex / agy print the OAuth URL to stdout?~~ | **Dropped 2026-07-14.** It existed only to gate L1, and L1 is rejected (D5) |
+| ~~S2a~~ | ~~Does `kernel.apparmor_restrict_unprivileged_userns` block bubblewrap inside the WSL2 kernel?~~ | **Answered 2026-07-14: no.** AppArmor is not enabled in the WSL2 kernel; apt's bwrap 0.9.0 runs unprivileged. L3 is bubblewrap (D5) |
+| **S2b** | Does an agent's own sandbox (codex ships one) nest inside ours, or conflict? | Whether L3 must special-case an agent. Cheap; do it while building L3 |
 | **S4** | Cold-boot time of Lima + our rootfs on Apple silicon | D6: lazy start vs start-at-login default |
 | **S5** | Snapshot latency of `git add -A` over a realistic workspace | Whether the checkpoint trigger needs debouncing |
 | **S6** | `brew install poppler pandoc` on aarch64 Ubuntu 24.04 — bottles, or source builds? | Confirms §5/§6 |

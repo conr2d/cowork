@@ -26,9 +26,11 @@ Naming: brand **Cowork**; GUI **Cowork.exe**; guest CLI **`cowork`**; future dae
 
 ## Scope discipline (one goal per version)
 
-v0.1 Setup · v0.2 Workspace · v0.3 Isolation · v0.4 Recovery · v0.5 Community · v0.6 Observability + budget.
+v0.1 Setup · v0.2 Workspace · **v0.3 Design** · v0.4 Isolation · v0.5 Recovery · v0.6 Community · v0.7 Observability + budget.
 
 **Do NOT** implement a later version's goal early. Credentials stay at each agent's default path inside the distro, which is the isolation boundary; a credential vault remains out of scope.
+
+**Isolation moved from v0.3 to v0.4** (2026-07-14). Cowork is single-user and single-machine, the environment already works without it, and no harm has been observed. Design took its place: a vitamin-class product is judged on how finished it feels, and the v0.2 gate exposed exactly the kind of rough edge that makes a non-developer quit. See `docs/architecture/isolation-and-platforms.md` D5 for what isolation now costs and what it buys — including one risk (Windows interop) we accept on purpose.
 
 ## Work intake — file it, do not fix it
 
@@ -36,7 +38,7 @@ v0.1 Setup · v0.2 Workspace · v0.3 Isolation · v0.4 Recovery · v0.5 Communit
 
 - Before starting work: `gh issue list`. Do not rediscover what is already filed.
 - On finding a defect or having an idea **mid-task**: `gh issue create`, then carry on with the task you were on. Do not detour.
-- **Milestones are versions** (`v0.2 — Workspace`, `v0.3 — Isolation`). Labels are orthogonal and reusable, so they do not accumulate per release:
+- **Milestones are versions** (`v0.3 — Design`, `v0.4 — Isolation`). Labels are orthogonal and reusable, so they do not accumulate per release:
   - `gate-blocker` — blocks closing the current version (passes the bug bar in the gate runbook §0)
   - `polish` — rough, but setup still completes; does not block
   - `design` — absorbed by the design overhaul

@@ -112,6 +112,9 @@ export function createSessionManager(
 
 	async function activate(workspace: WorkspaceDto, sessionId: string): Promise<void> {
 		activeBySlug[workspace.slug] = sessionId;
+		if (workspace.activeSessionId !== sessionId) {
+			void shell.setActiveSession(workspace.slug, sessionId);
+		}
 		statuses[sessionId] ??= 'cold';
 		if (open.some((ref) => ref.sessionId === sessionId) || mounting.has(sessionId)) return;
 		mounting.add(sessionId);
@@ -213,7 +216,7 @@ export function createSessionManager(
 				await create(workspace, null);
 				return;
 			}
-			const current = activeBySlug[workspace.slug];
+			const current = activeBySlug[workspace.slug] ?? workspace.activeSessionId ?? undefined;
 			const target = workspace.sessions.some((session) => session.id === current)
 				? current
 				: sortedSessions(workspace.sessions)[0].id;

@@ -70,6 +70,8 @@ pub struct WorkspaceMeta {
     pub default_agent: String,
     pub preset: String,
     pub sessions: Vec<SessionMeta>,
+    #[serde(default)]
+    pub active_session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -84,6 +86,8 @@ pub struct WorkspacePatch {
     pub preset: Option<String>,
     /// Whole-array replace; the frontend owns tab order/titles. None = leave as is.
     pub sessions: Option<Vec<SessionMeta>>,
+    /// Some(None) clears it (e.g. the active session was deleted); None leaves it as-is.
+    pub active_session_id: Option<Option<String>>,
 }
 
 pub struct CreateRequest {
@@ -126,6 +130,7 @@ pub fn create_workspace(
         default_agent: req.default_agent.clone(),
         preset: req.preset.clone(),
         sessions: vec![],
+        active_session_id: None,
     };
     all.push(meta.clone());
     store.save(&all)?;
@@ -171,6 +176,9 @@ pub fn update_workspace(
     }
     if let Some(sessions) = &patch.sessions {
         meta.sessions = sessions.clone();
+    }
+    if let Some(active_session_id) = &patch.active_session_id {
+        meta.active_session_id = active_session_id.clone();
     }
     let updated = meta.clone();
     store.save(&all)?;

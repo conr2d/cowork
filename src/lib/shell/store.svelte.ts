@@ -23,6 +23,7 @@ export interface Shell {
 	reorderPinned(slugs: readonly string[]): Promise<void>;
 	updateSessions(slug: string, sessions: SessionDto[]): Promise<void>;
 	setDefaultAgent(slug: string, agent: AgentId): Promise<void>;
+	setActiveSession(slug: string, sessionId: string): Promise<void>;
 }
 
 export function createShell(host: HostClient): Shell {
@@ -173,6 +174,14 @@ export function createShell(host: HostClient): Shell {
 		async setDefaultAgent(slug, agent) {
 			try {
 				await patchWorkspace(slug, { defaultAgent: agent });
+				error = null;
+			} catch (caught) {
+				error = asEnvelope(caught);
+			}
+		},
+		async setActiveSession(slug, sessionId) {
+			try {
+				await patchWorkspace(slug, { activeSessionId: sessionId });
 				error = null;
 			} catch (caught) {
 				error = asEnvelope(caught);

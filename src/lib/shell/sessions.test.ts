@@ -18,8 +18,8 @@ async function loadShellModules() {
 		$state?: <T>(initial: T) => T;
 		$derived?: <T>(value: T) => T;
 	};
-	runtime.$state ??= <T>(initial: T) => initial;
-	runtime.$derived ??= <T>(value: T) => value;
+	runtime.$state ??= (<T>(initial: T) => initial) as unknown as typeof $state;
+	runtime.$derived ??= (<T>(value: T) => value) as unknown as typeof $derived;
 	const [{ createSessionManager }, { createShell }] = await Promise.all([
 		import('./sessions.svelte'),
 		import('./store.svelte')
@@ -31,8 +31,7 @@ describe('createSessionManager', () => {
 	it('activates the first tab by order on fresh boot when no active session is persisted', async () => {
 		const host = createMockHost();
 		await host.workspaceUpdate('default', {
-			sessions: [session({ id: 'second', order: 2 }), session({ id: 'first', order: 1 })],
-			activeSessionId: null
+			sessions: [session({ id: 'second', order: 2 }), session({ id: 'first', order: 1 })]
 		});
 		const { createSessionManager, createShell } = await loadShellModules();
 		const shell = createShell(host);

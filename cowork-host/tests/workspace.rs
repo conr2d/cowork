@@ -370,7 +370,7 @@ fn update_round_trips_active_session_id() {
         &store,
         "default",
         &WorkspacePatch {
-            active_session_id: Some(Some("s1".to_string())),
+            active_session_id: Some("s1".to_string()),
             ..WorkspacePatch::default()
         },
     )
@@ -381,23 +381,11 @@ fn update_round_trips_active_session_id() {
         Some("s1")
     );
 
-    let updated = update_workspace(
-        &store,
-        "default",
-        &WorkspacePatch {
-            active_session_id: Some(None),
-            ..WorkspacePatch::default()
-        },
-    )
-    .unwrap();
-    assert_eq!(updated.active_session_id, None);
-    assert_eq!(store.load().unwrap()[0].active_session_id, None);
-
     update_workspace(
         &store,
         "default",
         &WorkspacePatch {
-            active_session_id: Some(Some("s1".to_string())),
+            active_session_id: Some("s1".to_string()),
             ..WorkspacePatch::default()
         },
     )

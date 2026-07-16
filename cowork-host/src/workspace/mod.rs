@@ -86,8 +86,7 @@ pub struct WorkspacePatch {
     pub preset: Option<String>,
     /// Whole-array replace; the frontend owns tab order/titles. None = leave as is.
     pub sessions: Option<Vec<SessionMeta>>,
-    /// Some(None) clears it (e.g. the active session was deleted); None leaves it as-is.
-    pub active_session_id: Option<Option<String>>,
+    pub active_session_id: Option<String>,
 }
 
 pub struct CreateRequest {
@@ -178,7 +177,7 @@ pub fn update_workspace(
         meta.sessions = sessions.clone();
     }
     if let Some(active_session_id) = &patch.active_session_id {
-        meta.active_session_id = active_session_id.clone();
+        meta.active_session_id = Some(active_session_id.clone());
     }
     let updated = meta.clone();
     store.save(&all)?;

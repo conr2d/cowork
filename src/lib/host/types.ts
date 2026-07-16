@@ -85,7 +85,7 @@ export interface WorkspacePatch {
 	defaultAgent?: AgentId;
 	preset?: string;
 	sessions?: SessionDto[];
-	activeSessionId?: string | null;
+	activeSessionId?: string;
 }
 
 /** Narrowing helper: did a `CheckStatus` fail? */

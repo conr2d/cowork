@@ -215,6 +215,7 @@ export function createMockHost(options: MockHostOptions = {}): HostClient {
 			rejectIf('captureSessionUuid', options.sessionUuids?.[agent] ?? null),
 		sessionCheck: (agent: AgentId) =>
 			rejectIf('sessionCheck', options.sessionChecks?.[agent] ?? true),
-		agentThemeSync: () => rejectIf('agentThemeSync', undefined)
+		agentThemeSync: () => rejectIf('agentThemeSync', undefined),
+		setWindowTheme: () => rejectIf('setWindowTheme', undefined)
 	};
 }

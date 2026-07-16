@@ -15,6 +15,7 @@ mod build_info;
 mod pty;
 mod session;
 mod setup;
+mod window_theme;
 mod workspace;
 
 use tauri::Manager;
@@ -31,6 +32,23 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .manage(pty::PtyState::default())
+        .setup(|app| {
+            if let Some(window) = app.get_webview_window("main") {
+                // First run lands on the fixed-light setup wizard; a provisioned
+                // machine opens the shell (dark by default). Paint the caption to
+                // match before the window shows, so there is no system-grey flash
+                // and no dark-caption-over-light-wizard mismatch on first launch.
+                // The shell's own effect re-asserts the user's saved theme after
+                // mount; the backend cannot read that localStorage preference here.
+                let theme = if setup::setup_is_complete() {
+                    "dark"
+                } else {
+                    "light"
+                };
+                let _ = window_theme::set_window_theme(window, theme.into());
+            }
+            Ok(())
+        })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
                 // Terminals are no longer torn down by frontend navigation; the
@@ -64,6 +82,7 @@ pub fn run() {
             session::capture_session_uuid,
             session::session_check,
             session::agent_theme_sync,
+            window_theme::set_window_theme,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

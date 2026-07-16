@@ -46,6 +46,10 @@
 		if (workspace) untrack(() => void manager.ensureActive(workspace));
 	});
 
+	$effect(() => {
+		void tauriHost.setWindowTheme(theme);
+	});
+
 	// Deleted workspaces / closed sessions unmount their terminals (which kills
 	// the PTYs). prune() untracks its own state internally.
 	$effect(() => {

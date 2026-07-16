@@ -49,3 +49,9 @@ cowork-errors = { path = "../cowork-errors" }
 # Base64-encode raw PTY output bytes for the Channel<String> stream (lossless
 # across UTF-8 chunk boundaries; smaller JSON than an integer array).
 base64 = "0.22"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+] }

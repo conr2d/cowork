@@ -40,6 +40,7 @@ export interface HostClient {
 	captureSessionUuid(agent: AgentId, slug: string, sinceMs: number): Promise<string | null>;
 	sessionCheck(agent: AgentId, uuid: string): Promise<boolean>;
 	agentThemeSync(theme: 'light' | 'dark'): Promise<void>;
+	setWindowTheme(theme: 'light' | 'dark'): Promise<void>;
 }
 
 /** A Tauri command rejection is the serialized backend `Envelope`. */
@@ -136,5 +137,9 @@ export const tauriHost: HostClient = {
 	async agentThemeSync(theme) {
 		const { invoke } = await import('@tauri-apps/api/core');
 		await invoke('agent_theme_sync', { theme });
+	},
+	async setWindowTheme(theme) {
+		const { invoke } = await import('@tauri-apps/api/core');
+		await invoke('set_window_theme', { theme });
 	}
 };

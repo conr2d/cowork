@@ -12,6 +12,7 @@
 	let build = $state<AppBuildDto | null>(null);
 
 	onMount(() => {
+		void tauriHost.setWindowTheme('light');
 		void loadAppBuild(tauriHost).then((value) => {
 			build = value;
 		});

@@ -8,6 +8,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 
 use cowork_errors::{Envelope, Stage};
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
@@ -16,14 +17,21 @@ use crate::protocol::{HostEvent, StreamParser};
 
 use super::inject::{
     RunOutcome, chmod_args, classify_run, cli_inject_failed_envelope, cli_launch_failed_envelope,
-    firstboot_setup_args, launch_args, needs_inject, terminate_args, unc_inject_path, write_args,
+    events_repairable, firstboot_setup_args, launch_args, needs_inject, repair_and_retry,
+    terminate_args, unc_inject_path, write_args,
 };
 use super::user_create_failed_envelope;
+
+/// Host-side path of the guest binary last injected, cached so a reactive repair
+/// (see [`run_guest_events`]) can re-inject without threading the path through
+/// every call site. First write wins; the path is stable per process.
+static GUEST_SRC: OnceLock<String> = OnceLock::new();
 
 /// Inject the host-side guest binary at `src_binary` into the `Cowork` distro:
 /// stream it to `/usr/local/bin/cowork` as root, then `chmod +x` it inside the
 /// distro (the piped write does not carry the executable bit).
 pub fn inject_guest(src_binary: &str) -> Result<(), Envelope> {
+    let _ = GUEST_SRC.set(src_binary.to_string());
     let mut child = Command::new("wsl.exe")
         .creation_flags(CREATE_NO_WINDOW)
         .args(write_args())
@@ -77,6 +85,19 @@ pub fn inject_guest(src_binary: &str) -> Result<(), Envelope> {
             out.status.code().unwrap_or(-1)
         ))),
         Err(e) => Err(cli_inject_failed_envelope(&format!("launch chmod: {e}"))),
+    }
+}
+
+/// Re-inject the guest binary from the cached source path, for reactive repair.
+/// If no source was ever cached (no injection this process — should not happen
+/// post-provision), repair is impossible; report it so the caller surfaces the
+/// original failure.
+fn repair_guest() -> Result<(), Envelope> {
+    match GUEST_SRC.get() {
+        Some(src) => inject_guest(src),
+        None => Err(cli_inject_failed_envelope(
+            "reactive repair: no cached guest source path",
+        )),
     }
 }
 
@@ -143,10 +164,10 @@ pub fn run_guest(
     }
 }
 
-/// Run the injected guest with `extra` args; stream stdout through the parser
-/// (stamped `stage`), forward `Progress` to `on_progress`, and return ALL parsed
-/// events plus the exit code. `Err` = the process could not be launched.
-pub fn run_guest_events(
+/// One guest invocation, no repair: stream stdout through the parser (stamped
+/// `stage`), forward `Progress` to `on_progress`, and return ALL parsed events
+/// plus the exit code. `Err` = the process could not be launched.
+fn run_guest_events_once(
     stage: Stage,
     extra: &[String],
     on_progress: &mut dyn FnMut(Stage, &str),
@@ -181,4 +202,22 @@ pub fn run_guest_events(
         Err(_) => -1,
     };
     Ok((events, exit_code))
+}
+
+/// Run the injected guest, with one reactive repair: if the first attempt fails
+/// to launch or crashes, re-inject the binary once and retry exactly once. This
+/// is the shared chokepoint for `run_guest` and direct event-stream callers. On
+/// a clean run (the happy path) nothing is re-injected. See issue #38.
+pub fn run_guest_events(
+    stage: Stage,
+    extra: &[String],
+    on_progress: &mut dyn FnMut(Stage, &str),
+) -> Result<(Vec<HostEvent>, i32), Envelope> {
+    let first = run_guest_events_once(stage, extra, on_progress);
+    repair_and_retry(
+        first,
+        |result| events_repairable(result, stage),
+        repair_guest,
+        || run_guest_events_once(stage, extra, on_progress),
+    )
 }

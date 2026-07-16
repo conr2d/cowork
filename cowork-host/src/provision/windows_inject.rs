@@ -107,6 +107,7 @@ fn repair_guest() -> Result<(), Envelope> {
 /// self-heals. Returns whether an injection ran. An unreadable installed
 /// binary counts as stale; a failed read of the shipped binary is a real error.
 pub fn sync_guest(src_binary: &str) -> Result<bool, Envelope> {
+    let _ = GUEST_SRC.set(src_binary.to_string()); // cache every boot for reactive repair, even when bytes match
     let shipped = std::fs::read(src_binary)
         .map_err(|e| cli_inject_failed_envelope(&format!("read shipped {src_binary}: {e}")))?;
     let installed = std::fs::read(unc_inject_path()).ok();
@@ -218,6 +219,7 @@ pub fn run_guest_events(
         first,
         |result| events_repairable(result, stage),
         repair_guest,
+        // must be _once (not run_guest_events) — calling the repairing variant would recurse
         || run_guest_events_once(stage, extra, on_progress),
     )
 }

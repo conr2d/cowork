@@ -56,7 +56,8 @@ const DEFAULT_WORKSPACE: WorkspaceDto = {
 	lastUsedMs: 0,
 	defaultAgent: 'claude',
 	preset: 'blank',
-	sessions: []
+	sessions: [],
+	activeSessionId: null
 };
 
 function workspaceEnvelope(
@@ -159,7 +160,8 @@ export function createMockHost(options: MockHostOptions = {}): HostClient {
 				lastUsedMs: Date.now(),
 				defaultAgent,
 				preset,
-				sessions: []
+				sessions: [],
+				activeSessionId: null
 			};
 			workspaces.push(workspace);
 			return workspace;
@@ -191,6 +193,7 @@ export function createMockHost(options: MockHostOptions = {}): HostClient {
 			if (patch.sessions !== undefined) {
 				workspace.sessions = patch.sessions.map((session) => ({ ...session }));
 			}
+			if (patch.activeSessionId !== undefined) workspace.activeSessionId = patch.activeSessionId;
 			return { ...workspace };
 		},
 		workspaceDelete: async (slug: string) => {

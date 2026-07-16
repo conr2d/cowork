@@ -24,6 +24,7 @@ export interface Shell {
 	updateSessions(slug: string, sessions: SessionDto[]): Promise<void>;
 	setDefaultAgent(slug: string, agent: AgentId): Promise<void>;
 	setActiveSession(slug: string, sessionId: string): Promise<void>;
+	bumpLastUsed(slug: string): Promise<void>;
 }
 
 export function createShell(host: HostClient): Shell {
@@ -98,11 +99,13 @@ export function createShell(host: HostClient): Shell {
 		},
 		async select(slug) {
 			activeSlug = slug;
+		},
+		async bumpLastUsed(slug) {
 			try {
 				await patchWorkspace(slug, { lastUsedMs: Date.now() });
-				error = null;
-			} catch (caught) {
-				error = asEnvelope(caught);
+			} catch {
+				// Best-effort recency; a failed bump must never disrupt the session or
+				// surface UI. Recency is not worth an error bar.
 			}
 		},
 		async create(name, agent, preset) {

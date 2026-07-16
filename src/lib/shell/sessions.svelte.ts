@@ -273,6 +273,14 @@ export function createSessionManager(
 				void maybeCapture(sessionId);
 				return;
 			}
+			// Burst start (was not already 'working') = the workspace is being worked in.
+			// Bump recency ONCE per burst — never per output chunk (this fires on every
+			// PTY chunk), and never on mere selection (that path no longer touches
+			// lastUsedMs). This is issue #32: Recent tracks activity, not clicks.
+			if (statuses[sessionId] !== 'working') {
+				const slug = open.find((ref) => ref.sessionId === sessionId)?.slug;
+				if (slug !== undefined) void shell.bumpLastUsed(slug);
+			}
 			statuses[sessionId] = 'working';
 			clearTimer(sessionId);
 			timers.set(

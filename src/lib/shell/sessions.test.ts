@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createMockHost } from '$lib/host/mock';
 import type { SessionDto, WorkspaceDto } from '$lib/host/types';
@@ -28,6 +28,63 @@ async function loadShellModules() {
 }
 
 describe('createSessionManager', () => {
+	it('does not bump last used when selecting a workspace', async () => {
+		const host = createMockHost();
+		const { createShell } = await loadShellModules();
+		const shell = createShell(host);
+		await shell.load();
+		const slug = 'default';
+		const before = shell.workspaces.find((item) => item.slug === slug)?.lastUsedMs;
+
+		await shell.select(slug);
+		await flushMicrotasks();
+
+		expect(shell.workspaces.find((item) => item.slug === slug)?.lastUsedMs).toBe(before);
+		expect((await host.workspaceList()).find((item) => item.slug === slug)?.lastUsedMs).toBe(
+			before
+		);
+	});
+
+	it('bumps last used when a mounted agent session becomes active', async () => {
+		const host = createMockHost();
+		const sessions = [session({ id: 'first', order: 1 })];
+		await host.workspaceUpdate('default', { lastUsedMs: 1, sessions });
+		const { createSessionManager, createShell } = await loadShellModules();
+		const shell = createShell(host);
+		await shell.load();
+		const manager = createSessionManager(shell, host, () => 'light');
+		const active = shell.workspaces.find((item) => item.slug === 'default') as WorkspaceDto;
+
+		await manager.activate(active, 'first');
+		manager.noteActivity('first', 'output');
+		await flushMicrotasks();
+
+		expect(
+			(await host.workspaceList()).find((item) => item.slug === active.slug)?.lastUsedMs
+		).toBeGreaterThan(1);
+	});
+
+	it('bumps last used only once during a continuous output burst', async () => {
+		const host = createMockHost();
+		const sessions = [session({ id: 'first', order: 1 })];
+		await host.workspaceUpdate('default', { sessions });
+		const { createSessionManager, createShell } = await loadShellModules();
+		const shell = createShell(host);
+		await shell.load();
+		const manager = createSessionManager(shell, host, () => 'light');
+		const active = shell.workspaces.find((item) => item.slug === 'default') as WorkspaceDto;
+
+		await manager.activate(active, 'first');
+		manager.noteActivity('first', 'output');
+		await flushMicrotasks();
+		const update = vi.spyOn(host, 'workspaceUpdate');
+
+		manager.noteActivity('first', 'output');
+		await flushMicrotasks();
+
+		expect(update.mock.calls.filter(([, patch]) => patch.lastUsedMs !== undefined)).toHaveLength(0);
+	});
+
 	it('activates the first tab by order on fresh boot when no active session is persisted', async () => {
 		const host = createMockHost();
 		await host.workspaceUpdate('default', {

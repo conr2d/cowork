@@ -143,3 +143,22 @@ export const tauriHost: HostClient = {
 		await invoke('set_window_theme', { theme });
 	}
 };
+
+import { createMockHost } from './mock';
+import { isTauri } from './env';
+
+/**
+ * The host the app should use. In a dev browser (no Tauri runtime) this is a
+ * mock so the UI runs standalone for design work; everywhere else — production,
+ * and `tauri dev` on Windows — it is the real Tauri-backed client. The mock
+ * branch is behind `import.meta.env.DEV`, so it is compiled out of any release
+ * build and `tauriHost` is the only path that ships.
+ */
+export function resolveHost(): HostClient {
+	if (import.meta.env.DEV && !isTauri()) {
+		return createMockHost({ setupComplete: true });
+	}
+	return tauriHost;
+}
+
+export const host: HostClient = resolveHost();

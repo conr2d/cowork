@@ -5,6 +5,7 @@
 	import '@xterm/xterm/css/xterm.css';
 
 	import type { Envelope, Kind } from '$lib/errors/registry';
+	import { isTauri } from '$lib/host/env';
 	import { asEnvelope } from '$lib/host/client';
 	import * as m from '$lib/paraglide/messages';
 	import { base64ToBytes } from '$lib/terminal/decode';
@@ -261,6 +262,46 @@
 					'@xterm/addon-unicode11',
 					() => import('@xterm/addon-unicode11')
 				);
+
+				if (!isTauri()) {
+					const term = new Terminal({
+						cursorBlink: true,
+						fontFamily: theme
+							? "'IBM Plex Mono', Cascadia Code, Consolas, monospace"
+							: 'Cascadia Code, Consolas, monospace',
+						fontSize: 14,
+						allowProposedApi: true,
+						windowsPty: { backend: 'conpty' },
+						theme: theme ? palette(theme) : undefined
+					});
+					termRef = term;
+
+					const fit = new FitAddon();
+					term.loadAddon(fit);
+					term.loadAddon(new Unicode11Addon());
+					term.unicode.activeVersion = '11';
+					term.open(container);
+
+					const visibility = await waitForVisibleContainer(container, () => disposed);
+					if (visibility !== 'visible') {
+						term.dispose();
+						return;
+					}
+
+					fit.fit();
+					term.writeln(
+						'\x1b[90m  Preview mode — the agent runs only inside Cowork on Windows.\x1b[0m'
+					);
+					cleanup = () => term.dispose();
+					if (disposed) {
+						cleanup();
+						cleanup = undefined;
+						return;
+					}
+
+					term.focus();
+					return;
+				}
 				const { invoke, Channel } = await loadModule(
 					'@tauri-apps/api/core',
 					() => import('@tauri-apps/api/core')

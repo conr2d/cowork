@@ -4,7 +4,7 @@
 	import Terminal from '$lib/components/Terminal.svelte';
 	import type { Envelope } from '$lib/errors/registry';
 	import { formatAppBuild, loadAppBuild } from '$lib/host/build';
-	import { asEnvelope, tauriHost } from '$lib/host/client';
+	import { asEnvelope, host } from '$lib/host/client';
 	import type { AppBuildDto } from '$lib/host/types';
 	import type { WorkspaceDto } from '$lib/host/types';
 	import * as m from '$lib/paraglide/messages';
@@ -18,11 +18,11 @@
 	import { createSessionManager } from '$lib/shell/sessions.svelte';
 	import { createShell } from '$lib/shell/store.svelte';
 
-	const shell = createShell(tauriHost);
+	const shell = createShell(host);
 
 	let theme = $state(loadTheme());
 	let build = $state<AppBuildDto | null>(null);
-	const manager = createSessionManager(shell, tauriHost, () => theme);
+	const manager = createSessionManager(shell, host, () => theme);
 	let collapsed = $state(loadCollapsed());
 	let newWorkspaceOpen = $state(false);
 	let renamingSlug = $state<string | null>(null);
@@ -47,7 +47,7 @@
 	});
 
 	$effect(() => {
-		void tauriHost.setWindowTheme(theme);
+		void host.setWindowTheme(theme);
 	});
 
 	// Deleted workspaces / closed sessions unmount their terminals (which kills
@@ -58,12 +58,12 @@
 
 	onMount(() => {
 		void (async () => {
-			build = await loadAppBuild(tauriHost);
+			build = await loadAppBuild(host);
 			let syncError: Envelope | null = null;
 			// Sync before anything probes the guest: a rebuilt app or a missing/corrupt
 			// installed binary must re-inject the shipped bytes into the distro.
 			// Best-effort: a failed sync still boots, but the shell surfaces the failure.
-			await tauriHost.guestSync().catch((caught) => {
+			await host.guestSync().catch((caught) => {
 				syncError = asEnvelope(caught);
 			});
 			await shell.load();
@@ -272,7 +272,7 @@
 	{/if}
 
 	{#if newWorkspaceOpen}
-		<NewWorkspaceDialog {shell} host={tauriHost} onclose={() => (newWorkspaceOpen = false)} />
+		<NewWorkspaceDialog {shell} {host} onclose={() => (newWorkspaceOpen = false)} />
 	{/if}
 
 	{#if deleteTarget}

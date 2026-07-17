@@ -211,9 +211,50 @@ pub fn classify_run(events: &[HostEvent], exit_code: i32, default_stage: Stage) 
     RunOutcome::Crashed(cli_crashed_envelope(exit_code, last_stage))
 }
 
+/// Does a finished `run_guest_events` result suggest the guest binary itself may
+/// be unusable and worth a one-shot re-inject? True only when the process could
+/// not be launched (`Err`) or it ran but crashed (no clean `Done`). A guest that
+/// emitted a domain error (`GuestFailed`) or a protocol fault (`ProtocolFault`)
+/// ran and communicated — re-injecting cannot help, so those are NOT repairable.
+pub fn events_repairable(result: &Result<(Vec<HostEvent>, i32), Envelope>, stage: Stage) -> bool {
+    match result {
+        Err(_) => true,
+        Ok((events, exit_code)) => {
+            matches!(
+                classify_run(events, *exit_code, stage),
+                RunOutcome::Crashed(_)
+            )
+        }
+    }
+}
+
+/// Run a guest invocation with at most one reactive repair. `first` is the
+/// already-computed first-attempt result. If it is not `repairable`, return it
+/// unchanged (zero-cost happy path). Otherwise attempt `repair` once: on success
+/// return the single `retry` result (final, whatever it is); on repair failure
+/// return the ORIGINAL `first` result (surface the real failure, not the
+/// repair's). `repair` and `retry` are `FnOnce`, so exactly one repair and at
+/// most one retry can ever happen — the retry cannot itself trigger another
+/// repair, structurally.
+pub fn repair_and_retry<T>(
+    first: T,
+    repairable: impl Fn(&T) -> bool,
+    repair: impl FnOnce() -> Result<(), Envelope>,
+    retry: impl FnOnce() -> T,
+) -> T {
+    if !repairable(&first) {
+        return first;
+    }
+    match repair() {
+        Ok(()) => retry(),
+        Err(_) => first,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
 
     fn progress(stage: Stage, step: &str) -> HostEvent {
         HostEvent::Progress {
@@ -429,5 +470,129 @@ mod tests {
             env.context.get("detail").map(String::as_str),
             Some("program not found")
         );
+    }
+
+    #[test]
+    fn launch_failure_is_repairable() {
+        let result = Err(cli_launch_failed_envelope("x"));
+        assert!(events_repairable(&result, Stage::Provision));
+    }
+
+    #[test]
+    fn clean_run_is_not_repairable() {
+        let result = Ok((
+            vec![HostEvent::Done {
+                stage: Stage::Provision,
+            }],
+            0,
+        ));
+        assert!(!events_repairable(&result, Stage::Provision));
+    }
+
+    #[test]
+    fn done_with_nonzero_exit_is_repairable() {
+        let result = Ok((
+            vec![
+                progress(Stage::Provision, "x"),
+                HostEvent::Done {
+                    stage: Stage::Provision,
+                },
+            ],
+            1,
+        ));
+        assert!(events_repairable(&result, Stage::Provision));
+    }
+
+    #[test]
+    fn empty_bad_exit_is_repairable() {
+        let result = Ok((vec![], -1));
+        assert!(events_repairable(&result, Stage::Provision));
+    }
+
+    #[test]
+    fn structured_guest_error_is_not_repairable() {
+        let result = Ok((
+            vec![HostEvent::GuestError(Envelope::new(
+                Code::ToolchainBrewInstallFailed,
+                Stage::Toolchain,
+            ))],
+            1,
+        ));
+        assert!(!events_repairable(&result, Stage::Provision));
+    }
+
+    #[test]
+    fn protocol_fault_is_not_repairable() {
+        let result = Ok((
+            vec![HostEvent::ProtocolError(Envelope::new(
+                Code::ProtocolParseError,
+                Stage::Provision,
+            ))],
+            1,
+        ));
+        assert!(!events_repairable(&result, Stage::Provision));
+    }
+
+    #[test]
+    fn non_repairable_result_skips_repair_and_retry() {
+        let repair_calls = Cell::new(0);
+        let retry_calls = Cell::new(0);
+        let result = repair_and_retry(
+            7,
+            |_| false,
+            || {
+                repair_calls.set(repair_calls.get() + 1);
+                Ok(())
+            },
+            || {
+                retry_calls.set(retry_calls.get() + 1);
+                8
+            },
+        );
+        assert_eq!(result, 7);
+        assert_eq!(repair_calls.get(), 0);
+        assert_eq!(retry_calls.get(), 0);
+    }
+
+    #[test]
+    fn successful_repair_retries_once_and_returns_retry_result() {
+        let repair_calls = Cell::new(0);
+        let retry_calls = Cell::new(0);
+        let result = repair_and_retry(
+            7,
+            |_| true,
+            || {
+                repair_calls.set(repair_calls.get() + 1);
+                Ok(())
+            },
+            || {
+                retry_calls.set(retry_calls.get() + 1);
+                8
+            },
+        );
+        assert_eq!(result, 8);
+        assert_eq!(repair_calls.get(), 1);
+        assert_eq!(retry_calls.get(), 1);
+    }
+
+    #[test]
+    fn failed_repair_returns_original_result_without_retry() {
+        let repair_calls = Cell::new(0);
+        let retry_calls = Cell::new(0);
+        let result = repair_and_retry(
+            7,
+            |_| true,
+            || {
+                repair_calls.set(repair_calls.get() + 1);
+                Err(cli_inject_failed_envelope("x"))
+            },
+            || {
+                retry_calls.set(retry_calls.get() + 1);
+                8
+            },
+        );
+        assert_eq!(result, 7);
+        assert_eq!(repair_calls.get(), 1);
+        assert_eq!(retry_calls.get(), 0);
     }
 }

@@ -285,6 +285,7 @@
 					const visibility = await waitForVisibleContainer(container, () => disposed);
 					if (visibility !== 'visible') {
 						term.dispose();
+						termRef = undefined;
 						return;
 					}
 

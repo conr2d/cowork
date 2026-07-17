@@ -15,6 +15,8 @@ import type {
 	WorkspacePatch,
 	WslEnableDto
 } from './types';
+import { createMockHost } from './mock';
+import { isTauri } from './env';
 
 /** The setup operations the wizard performs. Methods reject with an `Envelope`. */
 export interface HostClient {
@@ -144,15 +146,13 @@ export const tauriHost: HostClient = {
 	}
 };
 
-import { createMockHost } from './mock';
-import { isTauri } from './env';
-
 /**
  * The host the app should use. In a dev browser (no Tauri runtime) this is a
  * mock so the UI runs standalone for design work; everywhere else — production,
- * and `tauri dev` on Windows — it is the real Tauri-backed client. The mock
- * branch is behind `import.meta.env.DEV`, so it is compiled out of any release
- * build and `tauriHost` is the only path that ships.
+ * and `tauri dev` on Windows — it is the real Tauri-backed client. Safety does
+ * not depend on tree-shaking: `import.meta.env.DEV` is statically `false` in a
+ * release build, so the mock branch is unreachable at runtime (and dead-code
+ * eliminated), and a shipped user always gets `tauriHost`.
  */
 export function resolveHost(): HostClient {
 	if (import.meta.env.DEV && !isTauri()) {

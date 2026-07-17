@@ -1,6 +1,11 @@
 // An in-memory `HostClient` for component tests and UI development (no Tauri).
 // `createMockHost` returns a happy-path client; pass overrides to inject specific
 // behaviors (e.g. a failing step, or a pending resume).
+//
+// Invariant: this module MUST stay side-effect-free at import time, and
+// `createMockHost` must be referenced only from tests and from `resolveHost`'s
+// `import.meta.env.DEV` branch. Both let a release build dead-code-eliminate it
+// so the mock never runs for a shipped user (see `resolveHost` in ./client).
 
 import type { AgentId } from '$lib/terminal/agent';
 import type { HostClient } from './client';

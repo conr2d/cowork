@@ -2,11 +2,11 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { tauriHost } from '$lib/host/client';
+	import { host } from '$lib/host/client';
 
 	// Boot gate: setup-complete? -> shell; otherwise the first-run wizard.
 	onMount(async () => {
-		const complete = await tauriHost.setupIsComplete().catch(() => false);
+		const complete = await host.setupIsComplete().catch(() => false);
 		await goto(resolve(complete ? '/shell' : '/setup'), { replaceState: true });
 	});
 </script>

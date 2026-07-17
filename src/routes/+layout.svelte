@@ -8,7 +8,7 @@
 	import '@fontsource/ibm-plex-mono/600.css';
 	import '../app.css';
 	import { formatAppBuild, loadAppBuild } from '$lib/host/build';
-	import { tauriHost } from '$lib/host/client';
+	import { host } from '$lib/host/client';
 	import { getLocale } from '$lib/paraglide/runtime';
 
 	let { children } = $props();
@@ -18,7 +18,7 @@
 	});
 
 	onMount(() => {
-		void loadAppBuild(tauriHost).then((build) => {
+		void loadAppBuild(host).then((build) => {
 			if (build) console.info(formatAppBuild(build));
 		});
 	});

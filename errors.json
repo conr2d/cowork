@@ -39,7 +39,6 @@
 		"toolchain.prereq_apt_failed": { "kind": "Transient", "contextKeys": ["packages"] },
 		"toolchain.brew_install_failed": { "kind": "Transient", "contextKeys": ["exitCode"] },
 		"toolchain.mise_install_failed": { "kind": "Transient", "contextKeys": ["exitCode"] },
-		"toolchain.node_install_failed": { "kind": "Transient", "contextKeys": ["version", "exitCode"] },
 		"toolchain.profile_write_failed": { "kind": "Internal", "contextKeys": ["file"] },
 
 		"agent.install_failed": { "kind": "Transient", "contextKeys": ["agent", "exitCode"] },
@@ -48,10 +47,6 @@
 		"agent.binary_not_found": { "kind": "Internal", "contextKeys": ["agent", "expectedPath"] },
 		"agent.integrity_check_failed": { "kind": "Internal", "contextKeys": ["agent"] },
 
-		"auth.login_failed": { "kind": "NeedsUserAction", "contextKeys": ["agent", "exitCode"] },
-		"auth.login_timeout": { "kind": "NeedsUserAction", "contextKeys": ["agent"] },
-		"auth.browser_launch_failed": { "kind": "NeedsUserAction", "contextKeys": ["agent"] },
-		"auth.oauth_callback_failed": { "kind": "NeedsUserAction", "contextKeys": ["agent"] },
 		"auth.agent_not_found": { "kind": "Internal", "contextKeys": ["agent"] },
 		"session.uuid_capture_failed": { "kind": "Internal", "contextKeys": ["agent"] },
 		"agent.theme_sync_failed": { "kind": "Internal", "contextKeys": ["agent"] },
